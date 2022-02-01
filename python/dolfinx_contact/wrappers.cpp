@@ -10,6 +10,7 @@
 #include <dolfinx/la/petsc.h>
 #include <dolfinx/mesh/MeshTags.h>
 #include <dolfinx_contact/Contact.hpp>
+#include <dolfinx_contact/ContactMesh.hpp>
 #include <dolfinx_contact/coefficients.h>
 #include <dolfinx_contact/contact_kernels.hpp>
 #include <dolfinx_contact/utils.h>
@@ -35,6 +36,17 @@ PYBIND11_MODULE(cpp, m)
 #else
   m.attr("__version__") = "dev";
 #endif
+
+  // contact_mesh class
+  py::class_<dolfinx_contact::ContactMesh,
+             std::shared_ptr<dolfinx_contact::ContactMesh>>(
+      m, "ContactMesh", "ContactMesh object")
+      .def(py::init(
+          [](const dolfinx::mesh::Mesh& mesh,
+             const py::array_t<std::int32_t, py::array::c_style>& cells)
+          { return dolfinx_contact::ContactMesh(mesh, cells); }))
+
+      .def("new_cells", &dolfinx_contact::ContactMesh::new_cells);
 
   // Kernel wrapper class
   py::class_<contact_wrappers::KernelWrapper,
