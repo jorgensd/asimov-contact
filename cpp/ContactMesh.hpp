@@ -7,8 +7,10 @@
 #pragma once
 #include <dolfinx/common/IndexMap.h>
 #include <dolfinx/mesh/Mesh.h>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xio.hpp>
 
-namespace
+namespace dolfinx_contact
 {
 dolfinx::mesh::Mesh
 update_ghosts(const dolfinx::mesh::Mesh& mesh,
@@ -24,6 +26,7 @@ update_ghosts(const dolfinx::mesh::Mesh& mesh,
       = topology.index_map(0);
   std::shared_ptr<const dolfinx::graph::AdjacencyList<std::int32_t>> cv
       = topology.connectivity(tdim, 0);
+  assert(cv);
 
   std::int32_t num_local_cells = cell_map->size_local();
   std::int32_t num_ghosts = cell_map->num_ghosts();
@@ -69,18 +72,22 @@ update_ghosts(const dolfinx::mesh::Mesh& mesh,
       x(v, j) = coord[vertex_to_coord[v] * 3 + j];
 
   auto partitioner = [&dest](...) { return dest; };
-
-  return dolfinx::mesh::create_mesh(mesh.comm(), cell_vertices, geometry.cmap(),
-                                    x, dolfinx::mesh::GhostMode::shared_facet,
-                                    partitioner);
+  std::cout << "post\n";
+  auto new_mesh = dolfinx::mesh::create_mesh(
+      mesh.comm(), cell_vertices, geometry.cmap(), x,
+      dolfinx::mesh::GhostMode::shared_facet, partitioner);
+  std::cout << "HERPAJAOP";
+  return new_mesh;
 }
 
-} // namespace
+} // namespace dolfinx_contact
 
 namespace dolfinx_contact
 {
-dolfinx::mesh::Mesh add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
-                                    const tcb::span<const std::int32_t>& cells)
+// dolfinx::mesh::Mesh
+dolfinx::graph::AdjacencyList<std::int32_t>
+add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
+                const tcb::span<const std::int32_t>& cells)
 {
   std::uint8_t cell_indicator = cells.size() > 0 ? 1 : 0;
   MPI_Comm comm = mesh.comm();
@@ -100,45 +107,66 @@ dolfinx::mesh::Mesh add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
     for (int i = 0; i < mpi_size; ++i)
       if ((i != mpi_rank) && (procs_with_cells[i] == 1))
         edges.push_back(i);
-
-  // Create an Adjacency list of all shared cells
+  std::cout << "HERE!";
   const auto cell_map = mesh.topology().index_map(mesh.topology().dim());
   const std::int32_t num_local_cells = cell_map->size_local();
   std::vector<std::int32_t> num_dest_ranks(num_local_cells, 0);
-  std::map<std::int32_t, std::set<int>> shared_indices
-      = cell_map->compute_shared_indices();
+
+  // Get map from remote processes to owned cells
+  const dolfinx::graph::AdjacencyList<std::int32_t>& ghosted_indices
+      = cell_map->scatter_fwd_indices();
+  auto forward_comm
+      = cell_map->comm(dolfinx::common::IndexMap::Direction::forward);
+  std::array<std::vector<int>, 2> neighbours
+      = dolfinx::MPI::neighbors(forward_comm);
+  auto& src_ranks = neighbours[0];
+  for (std::int32_t i = 0; i < ghosted_indices.num_nodes(); i++)
+  {
+    auto cells = ghosted_indices.links(i);
+    for (auto cell : cells)
+      num_dest_ranks[cell]++;
+  }
+  std::cout << "HERE2!";
+
+  // Create map from owned cells to other processes having this cell as a ghost
+  std::map<std::int32_t, std::set<int>> cell_to_procs;
+  for (std::int32_t i = 0; i < ghosted_indices.num_nodes(); i++)
+  {
+    auto cells = ghosted_indices.links(i);
+    for (auto cell : cells)
+      cell_to_procs[cell].insert(src_ranks[i]);
+  }
   for (auto cell : cells)
   {
-    for (auto edge : edges)
-    {
-      if (cell < num_local_cells)
-        shared_indices[cell].insert(edge);
-    }
+    for (auto rank : edges)
+      cell_to_procs[cell].insert(rank);
   }
-  std::vector<std::size_t> num_shared_processes(num_local_cells, 0);
-  for (auto cell : shared_indices)
-  {
-    if (cell.first < num_local_cells)
-      num_shared_processes[cell.first] = cell.second.size();
-  }
+  for (std::int32_t i = 0; i < num_local_cells; i++)
+    cell_to_procs[i].insert(mpi_rank);
+
+  // Create Adjacency list
+  std::vector<std::size_t> num_shared_procs(num_local_cells, 0);
+  for (auto proc_map : cell_to_procs)
+    if (proc_map.first < num_local_cells)
+      num_shared_procs[proc_map.first] = proc_map.second.size();
   std::vector<std::int32_t> offsets(num_local_cells + 1, 0);
-  std::partial_sum(num_shared_processes.begin(), num_shared_processes.end(),
+  std::partial_sum(num_shared_procs.begin(), num_shared_procs.end(),
                    offsets.begin() + 1);
   std::vector<std::int32_t> data_ranks(offsets.back());
-  std::fill(num_shared_processes.begin(), num_shared_processes.end(), 0);
-  for (auto index : shared_indices)
+  std::fill(num_shared_procs.begin(), num_shared_procs.end(), 0);
+  for (auto index : cell_to_procs)
   {
     for (auto rank : index.second)
     {
       if (index.first < num_local_cells)
-        data_ranks[offsets[index.first] + num_shared_processes[index.first]++]
+        data_ranks[offsets[index.first] + num_shared_procs[index.first]++]
             = rank;
     }
   }
-
   dolfinx::graph::AdjacencyList<std::int32_t> new_shared_indices(
       std::move(data_ranks), std::move(offsets));
-  return update_ghosts(mesh, new_shared_indices);
+  return new_shared_indices;
+  //   return update_ghosts(mesh, new_shared_indices);
 };
 
 } // namespace dolfinx_contact

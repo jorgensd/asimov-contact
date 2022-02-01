@@ -38,15 +38,13 @@ PYBIND11_MODULE(cpp, m)
 #endif
 
   // contact_mesh class
-  py::class_<dolfinx_contact::ContactMesh,
-             std::shared_ptr<dolfinx_contact::ContactMesh>>(
-      m, "ContactMesh", "ContactMesh object")
-      .def(py::init(
-          [](const dolfinx::mesh::Mesh& mesh,
-             const py::array_t<std::int32_t, py::array::c_style>& cells)
-          { return dolfinx_contact::ContactMesh(mesh, cells); }))
-
-      .def("new_cells", &dolfinx_contact::ContactMesh::new_cells);
+  m.def("update_ghosts", dolfinx_contact::update_ghosts);
+  m.def(
+      "add_ghost_cells",
+      [](const dolfinx::mesh::Mesh& mesh,
+         const py::array_t<std::int32_t, py::array::c_style>& cells)
+      { return dolfinx_contact::add_ghost_cells(mesh, cells); },
+      py::arg("mesh"), py::arg("cells"));
 
   // Kernel wrapper class
   py::class_<contact_wrappers::KernelWrapper,
