@@ -71,12 +71,17 @@ update_ghosts(const dolfinx::mesh::Mesh& mesh,
     for (int j = 0; j < gdim; ++j)
       x(v, j) = coord[vertex_to_coord[v] * 3 + j];
 
-  auto partitioner = [&dest](...) { return dest; };
-  std::cout << "post\n";
-  auto new_mesh = dolfinx::mesh::create_mesh(
+  // Need to supply all input arguments to work with all compilers
+  auto partitioner =
+      [&dest](
+          [[maybe_unused]] MPI_Comm comm, [[maybe_unused]] int nparts,
+          [[maybe_unused]] int tdim,
+          [[maybe_unused]] const dolfinx::graph::AdjacencyList<int64_t>& cells,
+          [[maybe_unused]] dolfinx::mesh::GhostMode ghost_mode)
+  { return dest; };
+  dolfinx::mesh::Mesh new_mesh = dolfinx::mesh::create_mesh(
       mesh.comm(), cell_vertices, geometry.cmap(), x,
       dolfinx::mesh::GhostMode::shared_facet, partitioner);
-  std::cout << "HERPAJAOP";
   return new_mesh;
 }
 
@@ -107,7 +112,6 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
     for (int i = 0; i < mpi_size; ++i)
       if ((i != mpi_rank) && (procs_with_cells[i] == 1))
         edges.push_back(i);
-  std::cout << "HERE!";
   const auto cell_map = mesh.topology().index_map(mesh.topology().dim());
   const std::int32_t num_local_cells = cell_map->size_local();
   std::vector<std::int32_t> num_dest_ranks(num_local_cells, 0);
@@ -126,7 +130,6 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
     for (auto cell : cells)
       num_dest_ranks[cell]++;
   }
-  std::cout << "HERE2!";
 
   // Create map from owned cells to other processes having this cell as a ghost
   std::map<std::int32_t, std::set<int>> cell_to_procs;
