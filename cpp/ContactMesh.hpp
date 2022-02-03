@@ -114,7 +114,6 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
         edges.push_back(i);
   const auto cell_map = mesh.topology().index_map(mesh.topology().dim());
   const std::int32_t num_local_cells = cell_map->size_local();
-  std::vector<std::int32_t> num_dest_ranks(num_local_cells, 0);
 
   // Get map from remote processes to owned cells
   const dolfinx::graph::AdjacencyList<std::int32_t>& ghosted_indices
@@ -124,12 +123,6 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
   std::array<std::vector<int>, 2> neighbours
       = dolfinx::MPI::neighbors(forward_comm);
   auto& src_ranks = neighbours[0];
-  for (std::int32_t i = 0; i < ghosted_indices.num_nodes(); i++)
-  {
-    auto cells = ghosted_indices.links(i);
-    for (auto cell : cells)
-      num_dest_ranks[cell]++;
-  }
 
   // Create map from owned cells to other processes having this cell as a ghost
   std::map<std::int32_t, std::set<int>> cell_to_procs;
@@ -144,19 +137,17 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
     for (auto rank : edges)
       cell_to_procs[cell].insert(rank);
   }
-  for (std::int32_t i = 0; i < num_local_cells; i++)
-    cell_to_procs[i].insert(mpi_rank);
 
   // Create Adjacency list
-  std::vector<std::size_t> num_shared_procs(num_local_cells, 0);
+  std::vector<std::size_t> num_shared_procs(num_local_cells, 1);
   for (auto proc_map : cell_to_procs)
     if (proc_map.first < num_local_cells)
-      num_shared_procs[proc_map.first] = proc_map.second.size();
+      num_shared_procs[proc_map.first] += proc_map.second.size();
   std::vector<std::int32_t> offsets(num_local_cells + 1, 0);
   std::partial_sum(num_shared_procs.begin(), num_shared_procs.end(),
                    offsets.begin() + 1);
   std::vector<std::int32_t> data_ranks(offsets.back());
-  std::fill(num_shared_procs.begin(), num_shared_procs.end(), 0);
+  std::fill(num_shared_procs.begin(), num_shared_procs.end(), 1);
   for (auto index : cell_to_procs)
   {
     for (auto rank : index.second)
@@ -166,6 +157,10 @@ add_ghost_cells(const dolfinx::mesh::Mesh& mesh,
             = rank;
     }
   }
+  // Put own process indices first
+  for (std::size_t i = 0; i < num_local_cells; i++)
+    data_ranks[offsets[i]] = mpi_rank;
+
   dolfinx::graph::AdjacencyList<std::int32_t> new_shared_indices(
       std::move(data_ranks), std::move(offsets));
   return new_shared_indices;

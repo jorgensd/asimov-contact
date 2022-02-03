@@ -1,3 +1,4 @@
+import dolfinx.io
 from IPython import embed
 import dolfinx_contact
 from dolfinx_contact.cpp import add_ghost_cells, update_ghosts
@@ -6,23 +7,28 @@ import dolfinx.mesh
 import dolfinx_cuas
 from mpi4py import MPI
 import numpy as np
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 2, 5)
+mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 10, 10)
 
 
 def locator(x):
-    return x[0] <= 0.5 + 1e-15
+    return np.isclose(x[0], 0)
 
 
-cells = dolfinx.mesh.locate_entities(mesh, mesh.topology.dim, locator)
-num_cells_local = mesh.topology.index_map(mesh.topology.dim).size_local
-cells = cells[cells < num_cells_local]
+mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+facets = dolfinx.mesh.locate_entities(mesh, mesh.topology.dim - 1, locator)
+cells = dolfinx.mesh.compute_incident_entities(mesh, facets, mesh.topology.dim - 1, mesh.topology.dim)
 cmap = mesh.topology.index_map(mesh.topology.dim)
-glob_cells = cmap.local_to_global(cells)
-mt = dolfinx.mesh.MeshTags(mesh, mesh.topology.dim, cells, np.full(cells.size, 1,
+cells = cells[cells < cmap.size_local]
+mt = dolfinx.mesh.MeshTags(mesh, mesh.topology.dim, cells, np.full(cells.size, mesh.comm.rank,
                                                                    dtype=np.int32))
-print(mesh.comm.rank, cmap.ghosts, cmap.ghost_owner_rank())
+with dolfinx.io.XDMFFile(mesh.comm, "mt.xdmf", "w") as xdmf:
+    xdmf.write_mesh(mesh)
+    xdmf.write_meshtags(mt)
 mesh.topology.create_connectivity(mesh.topology.dim, 0)
 partitioner = add_ghost_cells(mesh, cells)
-print(partitioner)
-embed()
-print(update_ghosts(mesh, partitioner))
+print(mesh.comm.rank, partitioner)
+assert(partitioner.num_nodes == cmap.size_local)
+contact_mesh = update_ghosts(mesh, partitioner)
+
+# print("Rank", mesh.comm.rank, "Old num_ghost", mesh.topology.index_map(mesh.topology.dim).num_ghosts,
+#       "new_num_ghosts", contact_mesh.topology.index_map(contact_mesh.topology.dim).num_ghosts)
