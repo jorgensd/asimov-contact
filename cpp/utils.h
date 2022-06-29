@@ -21,6 +21,19 @@
 #include <xtensor/xtensor.hpp>
 namespace dolfinx_contact
 {
+
+enum class Kernel
+{
+  Rhs,
+  Jac
+};
+
+enum class ContactMode
+{
+  ClosestPoint,
+  RayTracing
+};
+
 // NOTE: this function should change signature to T * ,..... , num_links,
 // num_dofs_per_link
 template <typename T>
@@ -46,7 +59,6 @@ void pull_back(xt::xtensor<double, 3>& J, xt::xtensor<double, 3>& K,
                xt::xtensor<double, 2>& X,
                const xt::xtensor<double, 2>& coordinate_dofs,
                const dolfinx::fem::CoordinateElement& cmap);
-
 
 /// @param[in] cells: the cells to be sorted
 /// @param[in, out] perm: the permutation for the sorted cells
@@ -228,6 +240,8 @@ void compute_physical_points(const dolfinx::mesh::Mesh& mesh,
 /// distance to
 /// @param[in] candidate_facets The facets on candidate_mesh,defined as (cell,
 /// local_facet_index). Flattened row-major.
+/// @param[in] q_rule The quadrature rule for the input facets
+/// @param[in] mode The contact mode, either closest point or ray-tracing
 /// @returns An adjacency list for each input facet in quadrature facets, where
 /// the links indicate which facet on the other mesh is closest for each
 /// quadrature point.
@@ -236,6 +250,6 @@ compute_distance_map(const dolfinx::mesh::Mesh& quadrature_mesh,
                      xtl::span<const std::int32_t> quadrature_facets,
                      const dolfinx::mesh::Mesh& candidate_mesh,
                      xtl::span<const std::int32_t> candidate_facets,
-                     const QuadratureRule& q_rule);
+                     const QuadratureRule& q_rule, ContactMode mode);
 
 } // namespace dolfinx_contact

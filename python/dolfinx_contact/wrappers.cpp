@@ -59,6 +59,10 @@ PYBIND11_MODULE(cpp, m)
       .def("weights", [](dolfinx_contact::QuadratureRule& self)
            { return dolfinx_wrappers::as_pyarray(std::move(self.weights())); });
 
+  py::enum_<dolfinx_contact::ContactMode>(m, "ContactMode")
+      .value("ClosestPoint", dolfinx_contact::ContactMode::ClosestPoint)
+      .value("Raytracing", dolfinx_contact::ContactMode::RayTracing);
+
   // Contact
   py::class_<dolfinx_contact::Contact,
              std::shared_ptr<dolfinx_contact::Contact>>(m, "Contact",
@@ -68,9 +72,12 @@ PYBIND11_MODULE(cpp, m)
                     std::shared_ptr<
                         const dolfinx::graph::AdjacencyList<std::int32_t>>,
                     std::vector<std::array<int, 2>>,
-                    std::shared_ptr<dolfinx::fem::FunctionSpace>, const int>(),
-           py::arg("markers"), py::arg("sufaces"), py::arg("contact_pairs"),
-           py::arg("V"), py::arg("quadrature_degree") = 3)
+                    std::shared_ptr<dolfinx::fem::FunctionSpace>, const int,
+                    dolfinx_contact::ContactMode>(),
+           py::arg("markers"), py::arg("surfaces"), py::arg("contact_pairs"),
+           py::arg("V"), py::arg("quadrature_degree") = 3,
+           py::arg("search_method")
+           = dolfinx_contact::ContactMode::ClosestPoint)
       .def("create_distance_map",
            [](dolfinx_contact::Contact& self, int pair)
            {
@@ -272,6 +279,7 @@ PYBIND11_MODULE(cpp, m)
   py::enum_<dolfinx_contact::Kernel>(m, "Kernel")
       .value("Rhs", dolfinx_contact::Kernel::Rhs)
       .value("Jac", dolfinx_contact::Kernel::Jac);
+
   m.def(
       "pack_coefficient_quadrature",
       [](std::shared_ptr<const dolfinx::fem::Function<PetscScalar>> coeff,

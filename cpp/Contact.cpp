@@ -8,6 +8,7 @@
 #include "error_handling.h"
 #include "utils.h"
 #include <dolfinx/common/log.h>
+
 using namespace dolfinx_contact;
 
 namespace
@@ -53,8 +54,10 @@ dolfinx_contact::Contact::Contact(
         markers,
     std::shared_ptr<const dolfinx::graph::AdjacencyList<std::int32_t>> surfaces,
     const std::vector<std::array<int, 2>>& contact_pairs,
-    std::shared_ptr<dolfinx::fem::FunctionSpace> V, const int q_deg)
-    : _surfaces(surfaces->array()), _contact_pairs(contact_pairs), _V(V)
+    std::shared_ptr<dolfinx::fem::FunctionSpace> V, const int q_deg,
+    ContactMode mode)
+    : _surfaces(surfaces->array()), _contact_pairs(contact_pairs), _V(V),
+      _mode(mode)
 {
   std::size_t num_surfaces = surfaces->array().size();
   assert(_V);
@@ -225,7 +228,7 @@ void dolfinx_contact::Contact::create_distance_map(int pair)
       = std::make_shared<dolfinx::graph::AdjacencyList<std::int32_t>>(
           dolfinx_contact::compute_distance_map(*puppet_mesh, quadrature_facets,
                                                 *candidate_mesh, submesh_facets,
-                                                *_quadrature_rule));
+                                                *_quadrature_rule, _mode));
 
   // NOTE: More data that should be updated inside this code
   const dolfinx::fem::CoordinateElement& cmap

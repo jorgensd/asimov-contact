@@ -30,14 +30,6 @@ using mat_set_fn = const std::function<int(
     const xtl::span<const std::int32_t>&, const xtl::span<const std::int32_t>&,
     const xtl::span<const PetscScalar>&)>;
 
-namespace dolfinx_contact
-{
-enum class Kernel
-{
-  Rhs,
-  Jac
-};
-
 namespace
 {
 /// Tabulate the coordinate element basis functions at quadrature points
@@ -64,6 +56,8 @@ tabulate(const dolfinx::fem::CoordinateElement& cmap,
   return phi_c;
 }
 } // namespace
+namespace dolfinx_contact
+{
 
 class Contact
 {
@@ -81,7 +75,8 @@ public:
           std::shared_ptr<const dolfinx::graph::AdjacencyList<std::int32_t>>
               surfaces,
           const std::vector<std::array<int, 2>>& contact_pairs,
-          std::shared_ptr<dolfinx::fem::FunctionSpace> V, const int q_deg = 3);
+          std::shared_ptr<dolfinx::fem::FunctionSpace> V, const int q_deg = 3,
+          ContactMode mode = ContactMode::ClosestPoint);
 
   /// Return meshtag value for surface with index surface
   /// @param[in] surface - the index of the surface
@@ -1042,5 +1037,7 @@ private:
   std::vector<SubMesh> _submeshes;
   // facets as (cell, facet) pairs. The pairs are flattened row-major
   std::vector<std::vector<std::int32_t>> _cell_facet_pairs;
+  // Contact search mode
+  ContactMode _mode;
 };
 } // namespace dolfinx_contact
