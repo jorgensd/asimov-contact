@@ -918,6 +918,8 @@ public:
         assert(links.size() == num_q_points);
         for (std::size_t q = 0; q < num_q_points; ++q)
         {
+          if (links[q] < 0)
+            continue;
           auto linked_pair = facet_map->links(links[(int)q]);
           assert(!linked_pair.empty());
           const std::size_t row = i * num_q_points;
@@ -950,6 +952,8 @@ public:
     {
       for (std::size_t q = 0; q < num_q_points; ++q)
       {
+        if (cells[i * num_q_points + q] < 0)
+          continue;
         // Get degrees of freedom for current cell
         xtl::span<const std::int32_t> dofs
             = sub_dofmap->cell_dofs(cells[i * num_q_points + q]);

@@ -617,7 +617,7 @@ dolfinx_contact::Contact::pack_grad_test_functions(
   const auto cstride = int(num_q_points * max_links * ndofs * gdim);
 
   // temporary data structure used inside loop
-  std::vector<std::int32_t> cells(max_links);
+  std::vector<std::int32_t> cells(max_links, -1);
   // Loop over all facets
   for (std::size_t i = 0; i < num_facets; i++)
   {
@@ -627,8 +627,10 @@ dolfinx_contact::Contact::pack_grad_test_functions(
     // Compute Pi(x) form points x and gap funtion Pi(x) - x
     for (std::size_t j = 0; j < num_q_points; j++)
     {
+      if (links[j] < 0)
+        continue;
       const tcb::span<const int> linked_pair = facet_map->links(links[j]);
-      linked_cells[j] = linked_pair[0];
+      linked_cells[j] = linked_pair.front();
       const std::size_t row = i * num_q_points;
       for (std::size_t k = 0; k < gdim; k++)
         q_points(j, k) = qp_phys[i](j, k) + gap[row * gdim + j * gdim + k]
@@ -717,9 +719,11 @@ dolfinx_contact::Contact::pack_grad_u_contact(
     assert(links.size() == num_q_points);
     for (std::size_t q = 0; q < num_q_points; ++q)
     {
+      if (links[q] < 0)
+        continue;
       const std::size_t row = i * num_q_points;
       const tcb::span<const int> linked_pair = facet_map->links(links[q]);
-      cells[row + q] = parent_cells[linked_pair[0]];
+      cells[row + q] = parent_cells[linked_pair.front()];
       for (std::size_t j = 0; j < gdim; ++j)
       {
         points(row + q, j) = qp_phys[i](q, j) + gap[row * gdim + q * gdim + j]
@@ -748,6 +752,8 @@ dolfinx_contact::Contact::pack_grad_u_contact(
   {
     for (std::size_t q = 0; q < num_q_points; ++q)
     {
+      if (cells[i * num_q_points + q] < 0)
+        continue;
       // Get degrees of freedom for current cell
       xtl::span<const std::int32_t> dofs
           = dofmap->cell_dofs(cells[i * num_q_points + q]);
