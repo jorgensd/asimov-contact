@@ -822,76 +822,29 @@ dolfinx_contact::compute_distance_map(
 
   case dolfinx_contact::ContactMode::RayTracing:
   {
-    // Structures used for computing physical normal
-    xt::xtensor<double, 2> J({gdim, (std::size_t)tdim});
-    xt::xtensor<double, 2> K({(std::size_t)tdim, gdim});
-    xtl::span<const double> geom_dofs = geometry.x();
-    const graph::AdjacencyList<std::int32_t>& x_dofmap = geometry.dofmap();
-    const std::size_t num_nodes = cmap.dim();
-    xt::xtensor<double, 2> coordinate_dofs({num_nodes, gdim});
-    const xt::xtensor<double, 2> reference_normals
-        = basix::cell::facet_outward_normals(
-            dolfinx::mesh::cell_type_to_basix_type(topology.cell_type()));
-    // Tabulate first derivative of coordinate map basis for all quadrature
-    // points to be used for Jacobian computation
-    std::array<std::size_t, 4> shape
-        = cmap.tabulate_shape(1, q_points.shape(0));
-    xt::xtensor<double, 3> dphi({(std::size_t)tdim, shape[1], shape[2]});
+    if (tdim == 2)
     {
-      xt::xtensor<double, 4> phi(shape);
-      cmap.tabulate(1, q_points, phi);
-      dphi = xt::view(phi, xt::range(1, tdim + 1), xt::all(), xt::all(), 0);
-    }
-
-    // Variable to hold jth point for Jacbian computation
-    xt::xtensor<double, 2> dphi_j({dphi.shape(0), dphi.shape(2)});
-    xt::xtensor<double, 1> normal = xt::zeros<double>({gdim});
-    xt::xtensor<double, 1> q_point = xt::zeros<double>({gdim});
-    std::vector<std::int32_t> colliding_facet(
-        quadrature_facets.size() / 2 * num_q_points, -1);
-    for (std::size_t i = 0; i < quadrature_facets.size(); i += 2)
-    {
-      // Pack coordinate dofs
-      auto x_dofs = x_dofmap.links(quadrature_facets[i]);
-      assert(x_dofs.size() == num_nodes);
-      for (std::size_t j = 0; j < num_nodes; ++j)
+      if (gdim == 2)
       {
-        const int pos = 3 * x_dofs[j];
-        std::copy_n(std::next(geom_dofs.cbegin(), pos), gdim,
-                    std::next(coordinate_dofs.begin(), j * gdim));
+        return dolfinx_contact::compute_raytracing_map<2, 2>(
+            quadrature_mesh, quadrature_facets, quadrature_points,
+            candidate_mesh, candidate_facets);
       }
-      const std::int32_t facet_index = quadrature_facets[i + 1];
-      const xt::xtensor<double, 2>& facet_points = quadrature_points[i / 2];
-      for (std::size_t j = 0; j < num_q_points; ++j)
+      else if (gdim == 3)
       {
-        // Compute inverse Jacobian for covariant Piola transform
-        dphi_j
-            = xt::view(dphi, xt::all(), q_offset[facet_index] + j, xt::all());
-        std::fill(J.begin(), J.end(), 0);
-        dolfinx::fem::CoordinateElement::compute_jacobian(dphi_j,
-                                                          coordinate_dofs, J);
-        std::fill(K.begin(), K.end(), 0);
-        dolfinx::fem::CoordinateElement::compute_jacobian_inverse(J, K);
-        std::fill(normal.begin(), normal.end(), 0);
-        // Push forward normal using covariant Piola transform
-        physical_facet_normal(xtl::span(normal.data(), gdim), K,
-                              xt::row(reference_normals, facet_index));
-        std::copy_n(std::next(facet_points.begin(), j * gdim), gdim,
-                    q_point.begin());
-
-        auto [status, cell_idx, phys_point, reference_point]
-            = dolfinx_contact::raytracing(candidate_mesh, q_point, normal,
-                                          candidate_facets);
-        if (status > 0)
-          colliding_facet[i / 2 * num_q_points + j] = facets[cell_idx];
+        return dolfinx_contact::compute_raytracing_map<2, 3>(
+            quadrature_mesh, quadrature_facets, quadrature_points,
+            candidate_mesh, candidate_facets);
       }
     }
-
-    std::vector<std::int32_t> offset(quadrature_facets.size() / 2 + 1);
-    std::iota(offset.begin(), offset.end(), 0);
-    std::for_each(offset.begin(), offset.end(),
-                  [num_q_points](auto& i) { i *= num_q_points; });
-    return dolfinx::graph::AdjacencyList<std::int32_t>(colliding_facet, offset);
+    else if (tdim == 3)
+    {
+      return dolfinx_contact::compute_raytracing_map<3, 3>(
+          quadrature_mesh, quadrature_facets, quadrature_points, candidate_mesh,
+          candidate_facets);
+    }
   }
+  default:
+    throw std::runtime_error("Unsupported contact mode");
   }
 }
