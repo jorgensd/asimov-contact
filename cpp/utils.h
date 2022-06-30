@@ -39,7 +39,8 @@ enum class ContactMode
 template <typename T>
 using kernel_fn
     = std::function<void(std::vector<std::vector<T>>&, const T*, const T*,
-                         const double*, const int, const std::size_t)>;
+                         const double*, const int, const std::size_t,
+                         const std::vector<std::int32_t>&)>;
 
 /// This function computes the pull back for a set of points x on a cell
 /// described by coordinate_dofs as well as the corresponding Jacobian, their

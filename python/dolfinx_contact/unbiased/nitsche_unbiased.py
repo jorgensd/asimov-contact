@@ -197,8 +197,8 @@ def nitsche_unbiased(mesh: _mesh.Mesh, mesh_tags: list[_cpp.mesh.MeshTags_int32]
     # Custom assembly
     # create contact class
     with _common.Timer("~Contact: Init"):
-        mode = dolfinx_contact.cpp.ContactMode.Raytracing
-        #mode = dolfinx_contact.cpp.ContactMode.ClosestPoint
+        #mode = dolfinx_contact.cpp.ContactMode.Raytracing
+        mode = dolfinx_contact.cpp.ContactMode.ClosestPoint
         contact = dolfinx_contact.cpp.Contact(mesh_tags, surfaces, contact_pairs,
                                               V._cpp_object, quadrature_degree=quadrature_degree,
                                               search_method=mode)

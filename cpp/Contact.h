@@ -22,9 +22,10 @@
 #include <dolfinx/mesh/Mesh.h>
 #include <dolfinx/mesh/MeshTags.h>
 #include <dolfinx/mesh/cell_types.h>
-
+#include <xtensor/xadapt.hpp>
 #include <xtensor/xbuilder.hpp>
 #include <xtensor/xindex_view.hpp>
+#include <xtensor/xio.hpp>
 
 using mat_set_fn = const std::function<int(
     const xtl::span<const std::int32_t>&, const xtl::span<const std::int32_t>&,
@@ -225,11 +226,16 @@ public:
     /// `gamma`, `theta`.
     /// @param[in] coordinate_dofs The physical coordinates of cell. Assumed to
     /// be padded to 3D, (shape (num_nodes, 3)).
+    /// @param[in] facet_index Local facet index (relative to cell)
+    /// @param[in] num_links How many cells from opposite surface are connected
+    /// with the cell.
+    /// @param[in] q_indices The quadrature points to loop over
     kernel_fn<PetscScalar> unbiased_rhs
         = [kd, gdim, ndofs_cell,
            bs](std::vector<std::vector<PetscScalar>>& b, const PetscScalar* c,
                const PetscScalar* w, const double* coordinate_dofs,
-               const int facet_index, const std::size_t num_links)
+               const int facet_index, const std::size_t num_links,
+               const std::vector<std::int32_t>& q_indices)
 
     {
       // Retrieve some data from kd
@@ -286,7 +292,7 @@ public:
       xt::xtensor<double, 2> epsn({ndofs_cell, gdim});
       // Loop over quadrature points
       const int num_points = q_offset[1] - q_offset[0];
-      for (int q = 0; q < num_points; q++)
+      for (auto q : q_indices)
       {
         const std::size_t q_pos = q_offset[0] + q;
 
@@ -370,11 +376,16 @@ public:
     /// `gamma`, `theta`.
     /// @param[in] coordinate_dofs The physical coordinates of cell. Assumed
     /// to be padded to 3D, (shape (num_nodes, 3)).
+    /// @param[in] facet_index Local facet index (relative to cell)
+    /// @param[in] num_links How many cells from opposite surface are connected
+    /// with the cell.
+    /// @param[in] q_indices The quadrature points to loop over
     kernel_fn<PetscScalar> unbiased_jac
         = [kd, gdim, ndofs_cell,
            bs](std::vector<std::vector<PetscScalar>>& A, const double* c,
                const double* w, const double* coordinate_dofs,
-               const int facet_index, const std::size_t num_links)
+               const int facet_index, const std::size_t num_links,
+               const std::vector<std::int32_t>& q_indices)
     {
       // Retrieve some data from kd
       std::array<std::int32_t, 2> q_offset
@@ -428,7 +439,7 @@ public:
       xt::xtensor<double, 2> epsn = xt::zeros<double>({ndofs_cell, gdim});
       // Loop over quadrature points
       const int num_points = q_offset[1] - q_offset[0];
-      for (int q = 0; q < num_points; q++)
+      for (auto q : q_indices)
       {
         const std::size_t q_pos = q_offset[0] + q;
         // Update Jacobian and physical normal
@@ -568,19 +579,22 @@ public:
     // correct map
     const std::array<int, 2>& contact_pair = _contact_pairs[pair];
     const std::vector<std::int32_t>& active_facets
-        = _cell_facet_pairs[contact_pair[0]];
+        = _cell_facet_pairs[contact_pair.front()];
     std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> map
         = _facet_maps[pair];
     std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> facet_map
-        = _submeshes[contact_pair[1]].facet_map();
+        = _submeshes[contact_pair.back()].facet_map();
     for (std::size_t i = 0; i < active_facets.size(); i += 2)
     {
       std::vector<std::int32_t> linked_cells;
       const tcb::span<const int> links = map->links((int)i / 2);
       for (auto link : links)
       {
-        const tcb::span<const int> facet_pair = facet_map->links(link);
-        linked_cells.push_back(facet_pair[0]);
+        if (link > 0)
+        {
+          auto facet_pair = facet_map->links(link);
+          linked_cells.push_back(facet_pair.front());
+        }
       }
       // Remove duplicates
       std::sort(linked_cells.begin(), linked_cells.end());
@@ -666,6 +680,10 @@ public:
       int offset = (int)i * cstride;
       for (std::size_t q = 0; q < num_q_point; ++q)
       {
+        // Skip negative facet indices (No coefficietn on opposite surface has
+        // been found)
+        if (master_facets[i * num_q_point + q] < 0)
+          continue;
         // Get quadrature points in physical space for the ith facet, qth
         // quadrature point
         for (int k = 0; k < gdim; k++)
@@ -741,7 +759,7 @@ public:
         = xt::zeros<double>({std::size_t(num_q_points), std::size_t(gdim)});
 
     std::vector<std::int32_t> perm(num_q_points);
-    std::vector<std::int32_t> linked_cells(num_q_points);
+    std::vector<std::int32_t> linked_cells(num_q_points, -1);
     auto V_sub = std::make_shared<dolfinx::fem::FunctionSpace>(
         _submeshes[candidate_mt].create_functionspace(_V));
 
@@ -757,11 +775,16 @@ public:
     {
       const tcb::span<const int> links = map->links((int)i);
       assert(links.size() == num_q_points);
+      std::fill(linked_cells.begin(), linked_cells.end(), -1);
 
       // Compute Pi(x) form points x and gap funtion Pi(x) - x
       for (std::size_t j = 0; j < num_q_points; j++)
       {
-        const tcb::span<const int> linked_pair = facet_map->links(links[j]);
+        // Skip if quadrature point is not connected to any cell
+        if (links[j] < 0)
+          continue;
+
+        auto linked_pair = facet_map->links(links[j]);
         assert(!linked_pair.empty());
         linked_cells[j] = linked_pair.front();
         for (int k = 0; k < gdim; k++)
@@ -778,11 +801,14 @@ public:
               xtl::span(perm.data(), perm.size()));
       const std::vector<std::int32_t>& unique_cells = sorted_cells.first;
       const std::vector<std::int32_t>& offsets = sorted_cells.second;
+
       // Loop over sorted array of unique cells
       for (std::size_t j = 0; j < unique_cells.size(); ++j)
       {
 
         std::int32_t linked_cell = unique_cells[j];
+        if (linked_cell < 0)
+          continue;
         // Extract indices of all occurances of cell in the unsorted cell
         // array
         auto indices

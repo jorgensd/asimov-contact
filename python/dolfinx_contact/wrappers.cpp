@@ -146,13 +146,20 @@ PYBIND11_MODULE(cpp, m)
              const std::vector<std::int32_t>& parent_cells
                  = self.submesh(contact_pair[1]).parent_cells();
              std::vector<std::int32_t> data(old_data.size());
-             for (std::size_t i = 0; i < old_data.size(); ++i)
-             {
-               auto facet_sub = old_data[i];
-               auto facet_pair = facet_map->links(facet_sub);
-               auto cell_parent = parent_cells[facet_pair[0]];
-               data[i] = c_to_f->links(cell_parent)[facet_pair[1]];
-             }
+             std::transform(
+                 old_data.cbegin(), old_data.cend(), data.begin(),
+                 [&facet_map, &parent_cells, &c_to_f](auto submesh_facet)
+                 {
+                   if (submesh_facet < 0)
+                     return -1;
+                   else
+                   {
+                     auto facet_pair = facet_map->links(submesh_facet);
+                     assert(facet_pair.size() == 2);
+                     auto cell_parent = parent_cells[facet_pair.front()];
+                     return c_to_f->links(cell_parent)[facet_pair.back()];
+                   }
+                 });
              return std::make_shared<
                  dolfinx::graph::AdjacencyList<std::int32_t>>(
                  std::move(data), std::move(offsets));

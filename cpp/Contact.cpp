@@ -14,7 +14,7 @@ using namespace dolfinx_contact;
 namespace
 {
 
-/// Given a set of facets on the submesh, find all cells on the oposite surface
+/// Given a set of facets on the submesh, find all cells on the opposite surface
 /// of the parent mesh that is linked.
 /// @param[in, out] linked_cells List of unique cells on the parent mesh
 /// (sorted)
@@ -30,16 +30,20 @@ void compute_linked_cells(
         sub_to_parent,
     const tcb::span<const std::int32_t>& parent_cells)
 {
-  linked_cells.resize(submesh_facets.size());
-  std::transform(submesh_facets.cbegin(), submesh_facets.cend(),
-                 linked_cells.begin(),
-                 [&sub_to_parent, &parent_cells](const auto facet)
-                 {
-                   // Extract (cell, facet) pair from submesh
-                   auto facet_pair = sub_to_parent->links(facet);
-                   assert(facet_pair.size() == 2);
-                   return parent_cells[facet_pair[0]];
-                 });
+  linked_cells.resize(0);
+  linked_cells.reserve(submesh_facets.size());
+  std::for_each(submesh_facets.cbegin(), submesh_facets.cend(),
+                [&sub_to_parent, &parent_cells, &linked_cells](const auto facet)
+                {
+                  // Remove facets with negative index
+                  if (facet >= 0)
+                  {
+                    // Extract (cell, facet) pair from submesh
+                    auto facet_pair = sub_to_parent->links(facet);
+                    assert(facet_pair.size() == 2);
+                    linked_cells.push_back(parent_cells[facet_pair[0]]);
+                  }
+                });
 
   // Remove duplicates
   dolfinx::radix_sort(xtl::span<std::int32_t>(linked_cells));
@@ -154,9 +158,11 @@ Mat dolfinx_contact::Contact::create_petsc_matrix(
       linked_dofs.clear();
       for (auto link : _facet_maps[k]->links(i / 2))
       {
-        const int linked_sub_cell = facet_map->links(link)[0];
+        if (link < 0)
+          continue;
+        const int linked_sub_cell = facet_map->links(link).front();
         const std::int32_t linked_cell = parent_cells[linked_sub_cell];
-        tcb::span<const int> linked_cell_dofs = dofmap->cell_dofs(linked_cell);
+        auto linked_cell_dofs = dofmap->cell_dofs(linked_cell);
         for (auto dof : linked_cell_dofs)
           linked_dofs.push_back(dof);
       }
@@ -229,7 +235,6 @@ void dolfinx_contact::Contact::create_distance_map(int pair)
           dolfinx_contact::compute_distance_map(*puppet_mesh, quadrature_facets,
                                                 *candidate_mesh, submesh_facets,
                                                 *_quadrature_rule, _mode));
-
   // NOTE: More data that should be updated inside this code
   const dolfinx::fem::CoordinateElement& cmap
       = candidate_mesh->geometry().cmap();
@@ -239,7 +244,6 @@ void dolfinx_contact::Contact::create_distance_map(int pair)
   // points such that we compuld send them in to compute_distance_map.
   // Compute quadrature points on physical facet _qp_phys_"origin_meshtag"
   create_q_phys(puppet_mt);
-
   // Update maximum number of connected cells
   max_links(pair);
 }
@@ -308,10 +312,14 @@ dolfinx_contact::Contact::pack_ny(int pair,
     assert(links.size() == num_q_points);
     for (std::size_t q = 0; q < num_q_points; ++q)
     {
+      // Skip computation if quadrature point does not have a matching facet on
+      // the other side
+      if (links[q] < 0)
+        continue;
 
       // Extract linked cell and facet at quadrature point q
       const tcb::span<const int> linked_pair = facet_map->links(links[q]);
-      std::int32_t linked_cell = linked_pair[0];
+      std::int32_t linked_cell = linked_pair.front();
       // Compute Pi(x) from x, and gap = Pi(x) - x
       auto qp_iq = xt::row(qp_i, q);
       for (int k = 0; k < gdim; ++k)
@@ -405,11 +413,20 @@ void dolfinx_contact::Contact::assemble_matrix(
       std::copy_n(std::next(x_g.begin(), 3 * x_dofs[j]), gdim,
                   std::next(coordinate_dofs.begin(), j * 3));
     }
+    auto connected_facets = map->links((int)i / 2);
+    // Compute what quadrature points to integrate over (which ones has
+    // corresponding facets on other surface)
+    std::vector<std::int32_t> q_indices;
+    q_indices.reserve(connected_facets.size());
+    // NOTE: Should probably be pre-computed
+    for (std::size_t j = 0; j < connected_facets.size(); ++j)
+      if (connected_facets[j] > 0)
+        q_indices.push_back(j);
 
     if (max_links > 0)
     {
       // Compute the unique set of cells linked to the current facet
-      compute_linked_cells(linked_cells, map->links((int)i / 2), facet_map,
+      compute_linked_cells(linked_cells, connected_facets, facet_map,
                            parent_cells);
     }
     // Fill initial local element matrices with zeros prior to assembly
@@ -423,7 +440,8 @@ void dolfinx_contact::Contact::assemble_matrix(
     }
 
     kernel(Aes, coeffs.data() + i / 2 * cstride, constants.data(),
-           coordinate_dofs.data(), active_facets[i + 1], num_linked_cells);
+           coordinate_dofs.data(), active_facets[i + 1], num_linked_cells,
+           q_indices);
 
     // FIXME: We would have to handle possible Dirichlet conditions here, if we
     // think that we can have a case with contact and Dirichlet
@@ -432,6 +450,8 @@ void dolfinx_contact::Contact::assemble_matrix(
 
     for (std::size_t j = 0; j < num_linked_cells; j++)
     {
+      if (linked_cells[j] < 0)
+        continue;
       auto dmap_linked = dofmap->cell_dofs(linked_cells[j]);
       assert(!dmap_linked.empty());
       mat_set(dmap_cell, dmap_linked, Aes[3 * j + 1]);
@@ -510,10 +530,20 @@ void dolfinx_contact::Contact::assemble_vector(
                   std::next(coordinate_dofs.begin(), j * 3));
     }
 
+    auto connected_facets = map->links((int)i / 2);
+    // Compute what quadrature points to integrate over (which ones has
+    // corresponding facets on other surface)
+    std::vector<std::int32_t> q_indices;
+    q_indices.reserve(connected_facets.size());
+    // NOTE: Should probably be pre-computed
+    for (std::size_t j = 0; j < connected_facets.size(); ++j)
+      if (connected_facets[j] > 0)
+        q_indices.push_back(j);
+
     // Compute the unique set of cells linked to the current facet
     if (max_links > 0)
     {
-      compute_linked_cells(linked_cells, map->links((int)i / 2), facet_map,
+      compute_linked_cells(linked_cells, connected_facets, facet_map,
                            parent_cells);
     }
 
@@ -522,8 +552,10 @@ void dolfinx_contact::Contact::assemble_vector(
     std::fill(bes[0].begin(), bes[0].end(), 0);
     for (std::size_t j = 0; j < num_linked_cells; j++)
       std::fill(bes[j + 1].begin(), bes[j + 1].end(), 0);
+
     kernel(bes, coeffs.data() + i / 2 * cstride, constants.data(),
-           coordinate_dofs.data(), active_facets[i + 1], num_linked_cells);
+           coordinate_dofs.data(), active_facets[i + 1], num_linked_cells,
+           q_indices);
 
     // Add element vector to global vector
     const tcb::span<const int> dofs_cell = dofmap->cell_dofs(active_facets[i]);

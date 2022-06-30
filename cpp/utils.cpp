@@ -590,8 +590,8 @@ dolfinx_contact::entities_to_geometry_dofs(
   mesh.topology_mutable().create_connectivity(tdim, dim);
 
   // Create arrays for the adjacency-list
-  std::vector<std::int32_t> geometry_indices(num_entity_dofs
-                                             * entity_list.size());
+  std::vector<std::int32_t> geometry_indices(
+      num_entity_dofs * entity_list.size(), -1);
   std::vector<std::int32_t> offsets(entity_list.size() + 1, 0);
   for (std::size_t i = 0; i < entity_list.size(); ++i)
     offsets[i + 1] = std::int32_t((i + 1) * num_entity_dofs);
@@ -608,7 +608,10 @@ dolfinx_contact::entities_to_geometry_dofs(
   for (std::size_t i = 0; i < entity_list.size(); ++i)
   {
     const std::int32_t idx = entity_list[i];
-    const std::int32_t cell = e_to_c->links(idx)[0];
+    // Skip if negative cell index
+    if (idx < 0)
+      continue;
+    const std::int32_t cell = e_to_c->links(idx).front();
     const tcb::span<const int> cell_entities = c_to_e->links(cell);
     auto it = std::find(cell_entities.begin(), cell_entities.end(), idx);
     assert(it != cell_entities.end());
@@ -765,43 +768,43 @@ dolfinx_contact::compute_distance_map(
                             reference_facet_basis_values, quadrature_points);
   }
 
-  // Copy quadrature points to padded 3D structure
   assert(quadrature_points.size() == quadrature_facets.size() / 2);
   assert(quadrature_points[0].shape(0) == num_q_points);
-  xt::xtensor<double, 2> padded_quadrature_points = xt::zeros<double>(
-      {quadrature_points.size() * num_q_points, (std::size_t)3});
-  for (std::size_t i = 0; i < quadrature_points.size(); ++i)
+
+  // Convert cell,local_facet_index to facet_index (local to proc)
+  std::vector<std::int32_t> facets(candidate_facets.size() / 2);
+  std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> c_to_f
+      = candidate_mesh.topology().connectivity(tdim, fdim);
+  if (!c_to_f)
   {
-    assert(quadrature_points[i].shape(1) == gdim);
-    for (std::size_t j = 0; j < num_q_points; ++j)
-      for (std::size_t k = 0; k < gdim; ++k)
-        padded_quadrature_points(i * num_q_points + j, k)
-            = quadrature_points[i](j, k);
+    throw std::runtime_error(
+        "Missing cell->facet connectivity on candidate mesh.");
   }
 
+  for (std::size_t i = 0; i < candidate_facets.size(); i += 2)
+  {
+    auto local_facets = c_to_f->links(candidate_facets[i]);
+    assert(!local_facets.empty());
+    assert((std::size_t)candidate_facets[i + 1] < local_facets.size());
+    facets[i / 2] = local_facets[candidate_facets[i + 1]];
+  }
   switch (mode)
   {
   case dolfinx_contact::ContactMode::ClosestPoint:
   {
+    // Copy quadrature points to padded 3D structure
+    xt::xtensor<double, 2> padded_quadrature_points = xt::zeros<double>(
+        {quadrature_points.size() * num_q_points, (std::size_t)3});
+    for (std::size_t i = 0; i < quadrature_points.size(); ++i)
+    {
+      assert(quadrature_points[i].shape(1) == gdim);
+      for (std::size_t j = 0; j < num_q_points; ++j)
+        for (std::size_t k = 0; k < gdim; ++k)
+          padded_quadrature_points(i * num_q_points + j, k)
+              = quadrature_points[i](j, k);
+    }
     std::vector<std::int32_t> closest_entity;
 
-    // Convert cell,local_facet_index to facet_index (local to proc)
-    std::vector<std::int32_t> facets(candidate_facets.size() / 2);
-    std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> c_to_f
-        = candidate_mesh.topology().connectivity(tdim, fdim);
-    if (!c_to_f)
-    {
-      throw std::runtime_error(
-          "Missing cell->facet connectivity on candidate mesh.");
-    }
-
-    for (std::size_t i = 0; i < candidate_facets.size(); i += 2)
-    {
-      auto local_facets = c_to_f->links(candidate_facets[i]);
-      assert(!local_facets.empty());
-      assert((std::size_t)candidate_facets[i + 1] < local_facets.size());
-      facets[i / 2] = local_facets[candidate_facets[i + 1]];
-    }
     // Compute closest entity for each quadrature point
     dolfinx::geometry::BoundingBoxTree bbox(candidate_mesh, fdim, facets);
     dolfinx::geometry::BoundingBoxTree midpoint_tree
@@ -820,7 +823,6 @@ dolfinx_contact::compute_distance_map(
   case dolfinx_contact::ContactMode::RayTracing:
   {
     // Structures used for computing physical normal
-    std::cout << "GDIM " << gdim << " TDIM " << tdim << "\n";
     xt::xtensor<double, 2> J({gdim, (std::size_t)tdim});
     xt::xtensor<double, 2> K({(std::size_t)tdim, gdim});
     xtl::span<const double> geom_dofs = geometry.x();
@@ -845,7 +847,8 @@ dolfinx_contact::compute_distance_map(
     xt::xtensor<double, 2> dphi_j({dphi.shape(0), dphi.shape(2)});
     xt::xtensor<double, 1> normal = xt::zeros<double>({gdim});
     xt::xtensor<double, 1> q_point = xt::zeros<double>({gdim});
-
+    std::vector<std::int32_t> colliding_facet(
+        quadrature_facets.size() / 2 * num_q_points, -1);
     for (std::size_t i = 0; i < quadrature_facets.size(); i += 2)
     {
       // Pack coordinate dofs
@@ -875,18 +878,20 @@ dolfinx_contact::compute_distance_map(
                               xt::row(reference_normals, facet_index));
         std::copy_n(std::next(facet_points.begin(), j * gdim), gdim,
                     q_point.begin());
-        std::cout << "-------RAYTRACING----------\n";
-        std::cout << q_point << "\n";
-        std::cout << normal << "\n";
-        auto [status, cell, phys_point, reference_point]
+
+        auto [status, cell_idx, phys_point, reference_point]
             = dolfinx_contact::raytracing(candidate_mesh, q_point, normal,
                                           candidate_facets);
-        std::cout << status << " " << cell << phys_point << " "
-                  << "\n";
+        if (status > 0)
+          colliding_facet[i / 2 * num_q_points + j] = facets[cell_idx];
       }
     }
-    std::cout << "HERE!\n";
-    return dolfinx::graph::AdjacencyList<std::int32_t>(1);
+
+    std::vector<std::int32_t> offset(quadrature_facets.size() / 2 + 1);
+    std::iota(offset.begin(), offset.end(), 0);
+    std::for_each(offset.begin(), offset.end(),
+                  [num_q_points](auto& i) { i *= num_q_points; });
+    return dolfinx::graph::AdjacencyList<std::int32_t>(colliding_facet, offset);
   }
   }
 }
