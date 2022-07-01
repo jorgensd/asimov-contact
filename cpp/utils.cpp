@@ -8,75 +8,8 @@
 #include "error_handling.h"
 #include "geometric_quantities.h"
 #include <RayTracing.h>
-#include <dolfinx/geometry/BoundingBoxTree.h>
-#include <dolfinx/geometry/utils.h>
-#include <xtensor/xio.hpp>
 using namespace dolfinx_contact;
 
-namespace
-{
-
-void compute_projection_map(
-    const dolfinx::mesh::Mesh& candidate_mesh,
-    const std::vector<xt::xtensor<double, 2>>& quadrature_points,
-    tcb::span<const std::int32_t> candidate_facets)
-{
-  const int tdim = candidate_mesh.topology().dim();
-  const int num_q_points = quadrature_points.front().shape(0);
-  // Convert cell,local_facet_index to facet_index (local to proc)
-  std::vector<std::int32_t> facets(candidate_facets.size() / 2);
-  std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> c_to_f
-      = candidate_mesh.topology().connectivity(tdim, tdim - 1);
-  if (!c_to_f)
-  {
-    throw std::runtime_error(
-        "Missing cell->facet connectivity on candidate mesh.");
-  }
-
-  for (std::size_t i = 0; i < candidate_facets.size(); i += 2)
-  {
-    auto local_facets = c_to_f->links(candidate_facets[i]);
-    assert(!local_facets.empty());
-    assert((std::size_t)candidate_facets[i + 1] < local_facets.size());
-    facets[i / 2] = local_facets[candidate_facets[i + 1]];
-  }
-  // Copy quadrature points to padded 3D structure
-  xt::xtensor<double, 2> padded_quadrature_points = xt::zeros<double>(
-      {quadrature_points.size() * num_q_points, (std::size_t)3});
-  for (std::size_t i = 0; i < quadrature_points.size(); ++i)
-  {
-    assert(quadrature_points[i].shape(1) == gdim);
-    for (std::size_t j = 0; j < num_q_points; ++j)
-      for (std::size_t k = 0; k < gdim; ++k)
-        padded_quadrature_points(i * num_q_points + j, k)
-            = quadrature_points[i](j, k);
-  }
-
-  // Compute closest entity for each quadrature point
-  dolfinx::geometry::BoundingBoxTree bbox(candidate_mesh, tdim - 1, facets);
-  dolfinx::geometry::BoundingBoxTree midpoint_tree
-      = dolfinx::geometry::create_midpoint_tree(candidate_mesh, tdim - 1,
-                                                facets);
-  std::vector<std::int32_t> closest_entities
-      = dolfinx::geometry::compute_closest_entity(
-          bbox, midpoint_tree, candidate_mesh, padded_quadrature_points);
-
-  // Create structures used to create adjacency list of closest entity
-  std::vector<std::int32_t> offset(quadrature_facets.size() / 2 + 1);
-  std::iota(offset.begin(), offset.end(), 0);
-  std::for_each(offset.begin(), offset.end(),
-                [num_q_points](auto& i) { i *= num_q_points; });
-  dolfinx::graph::AdjacencyList<std::int32_t> adj(closest_entities, offset);
-
-  // Pull back to reference point for each facet on the other surface
-  for (std::size_t i = 0; i < quadrature_points.size(); ++i)
-  {
-  }
-}
-
-} // namespace
-
-//-----------------------------------------------------------------------------
 void dolfinx_contact::pull_back(xt::xtensor<double, 3>& J,
                                 xt::xtensor<double, 3>& K,
                                 xt::xtensor<double, 1>& detJ,
@@ -551,11 +484,11 @@ dolfinx_contact::get_update_normal(const dolfinx::fem::CoordinateElement& cmap)
 }
 //-------------------------------------------------------------------------------------
 
-/// Compute the active entities in DOLFINx format for a given integral type over
-/// a set of entities If the integral type is cell, return the input, if it is
-/// exterior facets, return a list of pairs (cell, local_facet_index), and if it
-/// is interior facets, return a list of tuples (cell_0, local_facet_index_0,
-/// cell_1, local_facet_index_1) for each entity.
+/// Compute the active entities in DOLFINx format for a given integral type
+/// over a set of entities If the integral type is cell, return the input, if
+/// it is exterior facets, return a list of pairs (cell, local_facet_index),
+/// and if it is interior facets, return a list of tuples (cell_0,
+/// local_facet_index_0, cell_1, local_facet_index_1) for each entity.
 /// @param[in] mesh The mesh
 /// @param[in] entities List of mesh entities
 /// @param[in] integral The type of integral
@@ -806,15 +739,13 @@ dolfinx_contact::compute_distance_map(
   // Push forward quadrature points
   std::vector<xt::xtensor<double, 2>> quadrature_points;
   {
-    const int fdim = tdim - 1;
-    assert(q_rule.dim() == fdim);
+    assert(q_rule.dim() == tdim - 1);
     assert(q_rule.cell_type(0)
-           == dolfinx::mesh::cell_entity_type(cell_type, fdim, 0));
+           == dolfinx::mesh::cell_entity_type(cell_type, tdim - 1, 0));
 
     // Get quadrature points on reference facets
     const xt::xtensor<double, 2>& q_points = q_rule.points();
     const std::vector<std::int32_t>& q_offset = q_rule.offset();
-    const std::size_t num_q_points = q_offset[1] - q_offset[0];
 
     // Tabulate coordinate element basis values
     std::array<std::size_t, 4> cmap_shape
@@ -831,15 +762,28 @@ dolfinx_contact::compute_distance_map(
     compute_physical_points(quadrature_mesh, quadrature_facets, q_offset,
                             reference_facet_basis_values, quadrature_points);
     assert(quadrature_points.size() == quadrature_facets.size() / 2);
-    assert(quadrature_points[0].shape(0) == num_q_points);
+    assert(quadrature_points[0].shape(0) == q_offset[1] - q_offset[0]);
   }
 
   switch (mode)
   {
   case dolfinx_contact::ContactMode::ClosestPoint:
   {
+    if (tdim == 2)
+    {
+      if (gdim == 2)
+        return dolfinx_contact::compute_projection_map<2, 2>(
+            candidate_mesh, quadrature_points, candidate_facets);
+      else if (gdim == 3)
+        return dolfinx_contact::compute_projection_map<2, 3>(
+            candidate_mesh, quadrature_points, candidate_facets);
+    }
+    else if (tdim == 3)
+      return dolfinx_contact::compute_projection_map<3, 3>(
+          candidate_mesh, quadrature_points, candidate_facets);
+    else
+      throw std::invalid_argument("1D meshes not supported");
   }
-
   case dolfinx_contact::ContactMode::RayTracing:
   {
     if (tdim == 2)
@@ -863,6 +807,8 @@ dolfinx_contact::compute_distance_map(
           quadrature_mesh, quadrature_facets, quadrature_points, candidate_mesh,
           candidate_facets);
     }
+    else
+      throw std::invalid_argument("1D meshes not supported");
   }
   default:
     throw std::runtime_error("Unsupported contact mode");

@@ -230,11 +230,12 @@ void dolfinx_contact::Contact::create_distance_map(int pair)
   }
 
   // Compute facet map
+  auto [adj, reference_x] = dolfinx_contact::compute_distance_map(
+      *puppet_mesh, quadrature_facets, *candidate_mesh, submesh_facets,
+      *_quadrature_rule, _mode);
+  std::cout << reference_x << "\n";
   _facet_maps[pair]
-      = std::make_shared<dolfinx::graph::AdjacencyList<std::int32_t>>(
-          dolfinx_contact::compute_distance_map(*puppet_mesh, quadrature_facets,
-                                                *candidate_mesh, submesh_facets,
-                                                *_quadrature_rule, _mode));
+      = std::make_shared<dolfinx::graph::AdjacencyList<std::int32_t>>(adj);
   // NOTE: More data that should be updated inside this code
   const dolfinx::fem::CoordinateElement& cmap
       = candidate_mesh->geometry().cmap();
