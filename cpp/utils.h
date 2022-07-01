@@ -246,10 +246,13 @@ void compute_physical_points(const dolfinx::mesh::Mesh& mesh,
 /// local_facet_index). Flattened row-major.
 /// @param[in] q_rule The quadrature rule for the input facets
 /// @param[in] mode The contact mode, either closest point or ray-tracing
-/// @returns An adjacency list for each input facet in quadrature facets, where
-/// the links indicate which facet on the other mesh is closest for each
-/// quadrature point.
-dolfinx::graph::AdjacencyList<std::int32_t>
+/// @returns A tuple (closest_facets, reference_points) where `closest_facets`
+/// is an adjacency list for each input facet in quadrature facets, where the
+/// links indicate which facet on the other mesh is closest for each quadrature
+/// point.`reference_points` is the corresponding points on the reference
+/// element for each quadrature point.  Shape (num_facets, num_q_points, tdim).
+/// Flattened to (num_facets*num_q_points, tdim).
+std::pair<dolfinx::graph::AdjacencyList<std::int32_t>, xt::xtensor<double, 2>>
 compute_distance_map(const dolfinx::mesh::Mesh& quadrature_mesh,
                      xtl::span<const std::int32_t> quadrature_facets,
                      const dolfinx::mesh::Mesh& candidate_mesh,
@@ -269,8 +272,14 @@ compute_distance_map(const dolfinx::mesh::Mesh& quadrature_mesh,
 /// @param[in] candidate_mesh The mesh to compute ray intersections with
 /// @param[in] candidate_facets Set of facets in the of tuples (cell_index,
 /// local_facet_index) for the `quadrature_mesh`. Flattened row major.
+/// @returns A tuple (facet_map, reference_points), where `facet_map` is an
+/// AdjacencyList from the ith facet tuple in `quadrature_facets` to the facet
+/// (index local to process) in `candidate_facets`. `reference_points` are the
+/// reference points for the point of intersection for each of the quadrature
+/// points on each facet. Shape (num_facets, num_q_points, tdim). Flattened to
+/// (num_facets*num_q_points, tdim).
 template <std::size_t tdim, std::size_t gdim>
-dolfinx::graph::AdjacencyList<std::int32_t>
+std::pair<dolfinx::graph::AdjacencyList<std::int32_t>, xt::xtensor<double, 2>>
 compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
                        xtl::span<const std::int32_t> quadrature_facets,
                        std::vector<xt::xtensor<double, 2>> quadrature_points,
@@ -325,7 +334,6 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   dolfinx::mesh::CellType cell_type = candidate_mesh.topology().cell_type();
   const dolfinx::mesh::Geometry& c_geometry = candidate_mesh.geometry();
   const dolfinx::fem::CoordinateElement& cmap_c = c_geometry.cmap();
-  assert(cmap_q.dim() == c_cmap.dim());
   const dolfinx::graph::AdjacencyList<std::int32_t>& c_dofmap
       = c_geometry.dofmap();
   xtl::span<const double> c_x = c_geometry.x();
@@ -343,7 +351,8 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   const std::size_t num_q_points = quadrature_points[0].shape(0);
   std::vector<std::int32_t> colliding_facet(
       quadrature_facets.size() / 2 * num_q_points, -1);
-
+  xt::xtensor<double, 2> reference_points(
+      {quadrature_facets.size() / 2 * num_q_points, tdim});
   for (std::size_t i = 0; i < quadrature_facets.size(); i += 2)
   {
     // Pack coordinate dofs
@@ -411,7 +420,11 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
         }
       }
       if (status > 0)
+      {
         colliding_facet[i / 2 * num_q_points + j] = facets[cell_idx];
+        xt::row(reference_points, i / 2 * num_q_points + j)
+            = allocated_memory.X_k;
+      }
     }
   }
   std::vector<std::int32_t> offset(quadrature_facets.size() / 2 + 1);
@@ -419,7 +432,8 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   std::for_each(offset.begin(), offset.end(),
                 [num_q_points](auto& i) { i *= num_q_points; });
   timer.stop();
-  return dolfinx::graph::AdjacencyList<std::int32_t>(colliding_facet, offset);
+  return {dolfinx::graph::AdjacencyList<std::int32_t>(colliding_facet, offset),
+          reference_points};
 }
 
 } // namespace dolfinx_contact
