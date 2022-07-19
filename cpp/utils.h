@@ -83,8 +83,8 @@ void pull_back(xt::xtensor<double, 3>& J, xt::xtensor<double, 3>& K,
 // offsets[i]<=k<offsets[i+1]. In the example if i = 0, then perm[k] = 0 or
 // perm[k] = 3.
 std::pair<std::vector<std::int32_t>, std::vector<std::int32_t>>
-sort_cells(const xtl::span<const std::int32_t>& cells,
-           const xtl::span<std::int32_t>& perm);
+sort_cells(const std::span<const std::int32_t>& cells,
+           const std::span<std::int32_t>& perm);
 
 /// @param[in] u: dolfinx function on function space base on basix element
 /// @param[in] mesh: mesh to be updated
@@ -126,7 +126,7 @@ evaluate_basis_shape(const dolfinx::fem::FunctionSpace& V,
 /// with the correct size (num_points, number_of_dofs, value_size).
 void evaluate_basis_functions(const dolfinx::fem::FunctionSpace& V,
                               const xt::xtensor<double, 2>& x,
-                              const xtl::span<const std::int32_t>& cells,
+                              const std::span<const std::int32_t>& cells,
                               xt::xtensor<double, 4>& basis_values,
                               std::size_t num_derivatives);
 
@@ -191,7 +191,7 @@ get_update_normal(const dolfinx::fem::CoordinateElement& cmap);
 /// @param[in] integral The type of integral
 std::vector<std::int32_t>
 compute_active_entities(std::shared_ptr<const dolfinx::mesh::Mesh> mesh,
-                        xtl::span<const std::int32_t> entities,
+                        std::span<const std::int32_t> entities,
                         dolfinx::fem::IntegralType integral);
 
 /// @brief Compute the geometry dof indices for a set of entities
@@ -205,7 +205,7 @@ compute_active_entities(std::shared_ptr<const dolfinx::mesh::Mesh> mesh,
 /// closure dofs of the i-th input entity
 dolfinx::graph::AdjacencyList<std::int32_t>
 entities_to_geometry_dofs(const mesh::Mesh& mesh, int dim,
-                          const xtl::span<const std::int32_t>& entity_list);
+                          const std::span<const std::int32_t>& entity_list);
 
 /// @brief find candidate facets within a given radius of puppet facets
 ///
@@ -235,7 +235,7 @@ std::vector<std::int32_t> find_candidate_surface_segment(
 /// reference facet
 /// @param[in, out] qp_phys vector to stor physical points per facet
 void compute_physical_points(const dolfinx::mesh::Mesh& mesh,
-                             xtl::span<const std::int32_t> facets,
+                             std::span<const std::int32_t> facets,
                              const std::vector<int>& offsets,
                              const xt::xtensor<double, 2>& phi,
                              std::vector<xt::xtensor<double, 2>>& qp_phys);
@@ -259,29 +259,37 @@ void compute_physical_points(const dolfinx::mesh::Mesh& mesh,
 /// Flattened to (num_facets*num_q_points, tdim).
 std::pair<dolfinx::graph::AdjacencyList<std::int32_t>, xt::xtensor<double, 2>>
 compute_distance_map(const dolfinx::mesh::Mesh& quadrature_mesh,
-                     xtl::span<const std::int32_t> quadrature_facets,
+                     std::span<const std::int32_t> quadrature_facets,
                      const dolfinx::mesh::Mesh& candidate_mesh,
-                     xtl::span<const std::int32_t> candidate_facets,
+                     std::span<const std::int32_t> candidate_facets,
                      const QuadratureRule& q_rule, ContactMode mode);
 
-/// Compute the relation between two meshes (mesh_q) and (mesh_c) by computing
-/// the intersection of rays from mesh_q onto mesh_c at a specific set of
-/// quadrature points on a subset of facets. There is also a subset of facets on
-/// mesh_c we use for intersection checks.
-/// @param[in] quadrature_mesh The mesh to compute rays from
-/// @param[in] quadrature_facets Set of facets in the of tuples (cell_index,
-/// local_facet_index) for the `quadrature_mesh`. Flattened row major.
-/// @param[in] quadrature_points The quadrature points on the
-/// `quadrature_facets`. The ith entry corresponds to the quadrature points in
-/// the ith tuple of `quadrature_facet`.
-/// @param[in] candidate_mesh The mesh to compute ray intersections with
-/// @param[in] candidate_facets Set of facets in the of tuples (cell_index,
-/// local_facet_index) for the `quadrature_mesh`. Flattened row major.
-/// @returns A tuple (facet_map, reference_points), where `facet_map` is an
-/// AdjacencyList from the ith facet tuple in `quadrature_facets` to the facet
-/// (index local to process) in `candidate_facets`. `reference_points` are the
-/// reference points for the point of intersection for each of the quadrature
-/// points on each facet. Shape (num_facets, num_q_points, tdim). Flattened to
+/// Compute the relation between two meshes (mesh_q) and
+/// (mesh_c) by computing the intersection of rays from
+/// mesh_q onto mesh_c at a specific set of quadrature
+/// points on a subset of facets. There is also a subset of
+/// facets on mesh_c we use for intersection checks.
+/// @param[in] quadrature_mesh The mesh to compute rays
+/// from
+/// @param[in] quadrature_facets Set of facets in the of
+/// tuples (cell_index, local_facet_index) for the
+/// `quadrature_mesh`. Flattened row major.
+/// @param[in] quadrature_points The quadrature points on
+/// the `quadrature_facets`. The ith entry corresponds to
+/// the quadrature points in the ith tuple of
+/// `quadrature_facet`.
+/// @param[in] candidate_mesh The mesh to compute ray
+/// intersections with
+/// @param[in] candidate_facets Set of facets in the of
+/// tuples (cell_index, local_facet_index) for the
+/// `quadrature_mesh`. Flattened row major.
+/// @returns A tuple (facet_map, reference_points), where
+/// `facet_map` is an AdjacencyList from the ith facet
+/// tuple in `quadrature_facets` to the facet (index local
+/// to process) in `candidate_facets`. `reference_points`
+/// are the reference points for the point of intersection
+/// for each of the quadrature points on each facet. Shape
+/// (num_facets, num_q_points, tdim). Flattened to
 /// (num_facets*num_q_points, tdim).
 template <std::size_t tdim, std::size_t gdim>
 std::pair<dolfinx::graph::AdjacencyList<std::int32_t>, xt::xtensor<double, 2>>
@@ -298,15 +306,16 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   assert(candidate_mesh.topology().dim() == tdim);
   assert(quadrature_mesh.topology().dim() == tdim);
   std::cout << "HELLOO\n";
-  // Convert (cell, local facet index) into facet index (local to process)
-  // Convert cell,local_facet_index to facet_index (local to proc)
+  // Convert (cell, local facet index) into facet index
+  // (local to process) Convert cell,local_facet_index to
+  // facet_index (local to proc)
   std::vector<std::int32_t> facets(candidate_facets.size() / 2);
   std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> c_to_f
       = candidate_mesh.topology().connectivity(tdim, tdim - 1);
   if (!c_to_f)
   {
-    throw std::runtime_error(
-        "Missing cell->facet connectivity on candidate mesh.");
+    throw std::runtime_error("Missing cell->facet connectivity on candidate "
+                             "mesh.");
   }
 
   for (std::size_t i = 0; i < candidate_facets.size(); i += 2)
@@ -328,9 +337,9 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   const graph::AdjacencyList<std::int32_t>& q_dofmap = geom_q.dofmap();
   const std::size_t num_nodes_q = cmap_q.dim();
   xt::xtensor<double, 2> coordinate_dofs_q({num_nodes_q, gdim});
-  const xt::xtensor<double, 2> reference_normals
-      = basix::cell::facet_outward_normals(
-          dolfinx::mesh::cell_type_to_basix_type(top_q.cell_type()));
+  auto [reference_normals, rn_shape] = basix::cell::facet_outward_normals(
+      dolfinx::mesh::cell_type_to_basix_type(top_q.cell_type()));
+
   const std::array<std::size_t, 4> basis_shape_q = cmap_q.tabulate_shape(1, 1);
   xt::xtensor<double, 4> basis_values_q(basis_shape_q);
   xt::xtensor<double, 2> dphi_q({tdim, basis_shape_q[2]});
@@ -375,7 +384,8 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
     for (std::size_t j = 0; j < num_q_points; ++j)
     {
 
-      // Compute inverse Jacobian for covariant Piola transform
+      // Compute inverse Jacobian for covariant Piola
+      // transform
       cmap_q.tabulate(1,
                       xt::reshape_view(xt::row(quadrature_points[i / 2], j),
                                        {static_cast<std::size_t>(1), tdim}),
@@ -388,10 +398,13 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
       std::fill(K.begin(), K.end(), 0);
       dolfinx::fem::CoordinateElement::compute_jacobian_inverse(J, K);
 
-      // Push forward normal using covariant Piola transform
+      // Push forward normal using covariant Piola
+      // transform
       std::fill(normal.begin(), normal.end(), 0);
-      physical_facet_normal(xtl::span(normal.data(), gdim), K,
-                            xt::row(reference_normals, facet_index));
+      physical_facet_normal(std::span(normal.data(), gdim), K,
+                            std::span(std::next(reference_normals.begin(),
+                                                rn_shape[1] * facet_index),
+                                      rn_shape[1]));
       dolfinx::common::impl::copy_N<gdim>(
           std::next(facet_points.begin(), j * gdim), q_point.begin());
       std::size_t cell_idx = -1;
@@ -401,8 +414,8 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
       int status = 0;
       for (std::size_t c = 0; c < candidate_facets.size(); c += 2)
       {
-        // Get cell geometry for candidate cell, reusing coordinate dofs to
-        // store new coordinate
+        // Get cell geometry for candidate cell, reusing
+        // coordinate dofs to store new coordinate
         auto x_dofs = c_dofmap.links(candidate_facets[c]);
         for (std::size_t k = 0; k < x_dofs.size(); ++k)
         {
@@ -444,20 +457,25 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
           reference_points};
 }
 
-/// Compute the relation between two meshes (mesh_q) and (mesh_c) by computing
-/// the closest point on mesh_c at a specific set of
-/// quadrature points on a subset of facets. There is also a subset of facets on
-/// mesh_c we use for intersection checks.
-/// @param[in] candidate_mesh The mesh to compute ray intersections with
-/// @param[in] quadrature_points The quadrature points on the
-/// `quadrature_facets`.
-/// @param[in] candidate_facets Set of facets in the of tuples (cell_index,
-/// local_facet_index) for the `quadrature_mesh`. Flattened row major.
-/// @returns A tuple (facet_map, reference_points), where `facet_map` is an
-/// AdjacencyList from the ith facet tuple in `quadrature_facets` to the facet
-/// (index local to process) in `candidate_facets`. `reference_points` are the
-/// reference points for the point of intersection for each of the quadrature
-/// points on each facet. Shape (num_facets, num_q_points, tdim). Flattened to
+/// Compute the relation between two meshes (mesh_q) and
+/// (mesh_c) by computing the closest point on mesh_c at a
+/// specific set of quadrature points on a subset of
+/// facets. There is also a subset of facets on mesh_c we
+/// use for intersection checks.
+/// @param[in] candidate_mesh The mesh to compute ray
+/// intersections with
+/// @param[in] quadrature_points The quadrature points on
+/// the `quadrature_facets`.
+/// @param[in] candidate_facets Set of facets in the of
+/// tuples (cell_index, local_facet_index) for the
+/// `quadrature_mesh`. Flattened row major.
+/// @returns A tuple (facet_map, reference_points), where
+/// `facet_map` is an AdjacencyList from the ith facet
+/// tuple in `quadrature_facets` to the facet (index local
+/// to process) in `candidate_facets`. `reference_points`
+/// are the reference points for the point of intersection
+/// for each of the quadrature points on each facet. Shape
+/// (num_facets, num_q_points, tdim). Flattened to
 /// (num_facets*num_q_points, tdim).
 template <std::size_t tdim, std::size_t gdim>
 std::pair<dolfinx::graph::AdjacencyList<std::int32_t>, xt ::xtensor<double, 2>>
@@ -470,14 +488,15 @@ compute_projection_map(
   assert(candidate_mesh.geometry().dim() == gdim);
   const int num_q_points = quadrature_points.front().shape(0);
 
-  // Convert cell,local_facet_index to facet_index (local to proc)
+  // Convert cell,local_facet_index to facet_index (local
+  // to proc)
   std::vector<std::int32_t> facets(candidate_facets.size() / 2);
   std::shared_ptr<const dolfinx::graph::AdjacencyList<int>> c_to_f
       = candidate_mesh.topology().connectivity(tdim, tdim - 1);
   if (!c_to_f)
   {
-    throw std::runtime_error(
-        "Missing cell->facet connectivity on candidate mesh.");
+    throw std::runtime_error("Missing cell->facet connectivity on candidate "
+                             "mesh.");
   }
 
   for (std::size_t i = 0; i < candidate_facets.size(); i += 2)
@@ -509,7 +528,8 @@ compute_projection_map(
       = dolfinx::geometry::compute_closest_entity(
           bbox, midpoint_tree, candidate_mesh, padded_quadrature_points);
 
-  // Create structures used to create adjacency list of closest entity
+  // Create structures used to create adjacency list of
+  // closest entity
   std::vector<std::int32_t> offset(quadrature_points.size() + 1);
   std::iota(offset.begin(), offset.end(), 0);
   std::for_each(offset.begin(), offset.end(),
@@ -521,15 +541,16 @@ compute_projection_map(
   const dolfinx::fem::CoordinateElement& cmap
       = candidate_mesh.geometry().cmap();
   {
-    // Find displacement vector from each quadrature point to closest entity
-    // As a point on the opposite surface might have penetrated the cell in
-    // question, we use the convex hull of the surface facet for distance
+    // Find displacement vector from each quadrature point
+    // to closest entity As a point on the opposite surface
+    // might have penetrated the cell in question, we use
+    // the convex hull of the surface facet for distance
     // computations
 
-    // Get information aboute cell type and number of closure dofs on the
-    // facet
-    // NOTE: Assumption that we do not have variable facet types
-    // (prism/pyramid cell)
+    // Get information aboute cell type and number of
+    // closure dofs on the facet NOTE: Assumption that we
+    // do not have variable facet types (prism/pyramid
+    // cell)
     const dolfinx::fem::ElementDofLayout layout = cmap.create_dof_layout();
 
     error::check_cell_type(candidate_mesh.topology().cell_type());
@@ -540,15 +561,15 @@ compute_projection_map(
         = quadrature_points.front().shape(0);
     // Get all connected facets for each quadrature point
 
-    // Get the geometry dofs for each of the facets for each quadrature point
-    // on the opposite surface
+    // Get the geometry dofs for each of the facets for
+    // each quadrature point on the opposite surface
     const dolfinx::graph::AdjacencyList<std::int32_t> facets_geometry
         = dolfinx_contact::entities_to_geometry_dofs(candidate_mesh, tdim - 1,
                                                      candidate_facets);
 
     // Temporary data structures used in loops
     xt::xtensor<double, 2> point = {{0, 0, 0}};
-    xt::xtensor_fixed<double, xt::xshape<3>> dist_vec;
+    std::array<double, 3> dist_vec;
     xt::xtensor<double, 2> master_coords(
         {num_facet_dofs, static_cast<std::size_t>(3)});
 
@@ -557,42 +578,48 @@ compute_projection_map(
     {
       for (std::size_t q = 0; q < num_quadrature_points; ++q)
       {
-        // Get quadrature points in physical space for the ith facet, qth
-        // quadrature point
-        dolfinx::common::impl::copy_N<3>(
-            std::next(padded_quadrature_points.data(),
-                      i * num_quadrature_points + q),
-            point.begin());
+        // Get quadrature points in physical space for the
+        // ith facet, qth quadrature point
 
-        // Get the geometry dofs for the ith facet, qth quadrature point
+        // Get the geometry dofs for the ith facet, qth
+        // quadrature point
         auto candidate_facet_dofs
             = facets_geometry.links(int(i * num_quadrature_points + q));
         assert(num_facet_dofs == candidate_facet_dofs.size());
 
-        // Get the coordinates of the geometry on the other interface,
-        // and compute the distance of the convex hull created by the points
+        // Get the coordinates of the geometry on the other
+        // interface, and compute the distance of the
+        // convex hull created by the points
         for (std::size_t l = 0; l < num_facet_dofs; ++l)
         {
-          // Copy mesh geometry of facets into standalone array
+          // Copy mesh geometry of facets into standalone
+          // array
           dolfinx::common::impl::copy_N<3>(
               std::next(mesh_geometry.begin(), 3 * candidate_facet_dofs[l]),
               std::next(master_coords.begin(), 3 * l));
         }
-        dist_vec
-            = dolfinx::geometry::compute_distance_gjk(master_coords, point);
+        dist_vec = dolfinx::geometry::compute_distance_gjk(
+            master_coords, std::span(std::next(padded_quadrature_points.begin(),
+                                               i * num_quadrature_points + q),
+                                     3));
 
-        xt::row(candidate_x, i * num_q_points + q)
-            = xt::row(point, 0) + dist_vec;
+        for (std::size_t l = 0; l < 3; ++l)
+        {
+          candidate_x(i * num_q_points + q, l)
+              = padded_quadrature_points(i * num_quadrature_points + q, l)
+                + dist_vec[l];
+        }
       }
     }
   }
 
-  // Pull back to reference point for each facet on the other surface
+  // Pull back to reference point for each facet on the
+  // other surface
   xt::xtensor<double, 2> candidate_X(
       {quadrature_points.size() * num_q_points, (std::size_t)gdim});
   {
-    // Temporary data structures used in loop over each quadrature point on each
-    // facet
+    // Temporary data structures used in loop over each
+    // quadrature point on each facet
     xt::xtensor<double, 3> J(
         {static_cast<std::size_t>(1), (std::size_t)gdim, (std::size_t)tdim});
     xt::xtensor<double, 3> K(
@@ -634,8 +661,8 @@ compute_projection_map(
         // Pull back coordinates
         std::fill(J.begin(), J.end(), 0);
         std::fill(K.begin(), K.end(), 0);
-        // NOTE: Would benefit from pulling back all points in a single cell at
-        // the same time
+        // NOTE: Would benefit from pulling back all points
+        // in a single cell at the same time
         dolfinx_contact::pull_back(J, K, detJ, x, X, coordinate_dofs, cmap);
         dolfinx::common::impl::copy_N<tdim>(
             X.begin(),

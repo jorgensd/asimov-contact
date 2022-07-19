@@ -9,6 +9,7 @@
 #include <dolfinx/fem/FiniteElement.h>
 #include <dolfinx/mesh/Mesh.h>
 #include <xtensor/xtensor.hpp>
+#include <xtensor/xview.hpp>
 namespace dolfinx_contact
 {
 
@@ -94,7 +95,7 @@ void physical_facet_normal(E&& physical_normal, F&& K, G&& reference_normal)
   }
   // Normalize vector
   double norm = 0;
-  std::for_each(physical_normal.cbegin(), physical_normal.cend(),
+  std::for_each(physical_normal.begin(), physical_normal.end(),
                 [&norm](auto ni) { norm += std::pow(ni, 2); });
   norm = std::sqrt(norm);
   std::for_each(physical_normal.begin(), physical_normal.end(),

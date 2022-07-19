@@ -20,7 +20,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <xtl/xspan.hpp>
+
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 
@@ -184,9 +184,9 @@ PYBIND11_MODULE(cpp, m)
              self.assemble_matrix(
                  dolfinx::la::petsc::Matrix::set_block_fn(A, ADD_VALUES), bcs,
                  origin_meshtag, ker,
-                 xtl::span<const PetscScalar>(coeffs.data(), coeffs.size()),
+                 std::span<const PetscScalar>(coeffs.data(), coeffs.size()),
                  coeffs.shape(1),
-                 xtl::span(constants.data(), constants.shape(0)));
+                 std::span(constants.data(), constants.shape(0)));
            })
       .def("assemble_vector",
            [](dolfinx_contact::Contact& self,
@@ -197,10 +197,10 @@ PYBIND11_MODULE(cpp, m)
            {
              auto ker = kernel.get();
              self.assemble_vector(
-                 xtl::span(b.mutable_data(), b.shape(0)), origin_meshtag, ker,
-                 xtl::span<const PetscScalar>(coeffs.data(), coeffs.size()),
+                 std::span(b.mutable_data(), b.shape(0)), origin_meshtag, ker,
+                 std::span<const PetscScalar>(coeffs.data(), coeffs.size()),
                  coeffs.shape(1),
-                 xtl::span(constants.data(), constants.shape(0)));
+                 std::span(constants.data(), constants.shape(0)));
            })
       .def("pack_test_functions",
            [](dolfinx_contact::Contact& self, int origin_meshtag,
@@ -208,7 +208,7 @@ PYBIND11_MODULE(cpp, m)
            {
              auto [coeffs, cstride] = self.pack_test_functions(
                  origin_meshtag,
-                 xtl::span<const PetscScalar>(gap.data(), gap.size()));
+                 std::span<const PetscScalar>(gap.data(), gap.size()));
              int shape0 = cstride == 0 ? 0 : coeffs.size() / cstride;
              return dolfinx_wrappers::as_pyarray(std::move(coeffs),
                                                  std::array{shape0, cstride});
@@ -221,8 +221,8 @@ PYBIND11_MODULE(cpp, m)
           {
             auto [coeffs, cstride] = self.pack_grad_test_functions(
                 origin_meshtag,
-                xtl::span<const PetscScalar>(gap.data(), gap.size()),
-                xtl::span<const PetscScalar>(u_packed.data(), u_packed.size()));
+                std::span<const PetscScalar>(gap.data(), gap.size()),
+                std::span<const PetscScalar>(u_packed.data(), u_packed.size()));
             int shape0 = cstride == 0 ? 0 : coeffs.size() / cstride;
             return dolfinx_wrappers::as_pyarray(std::move(coeffs),
                                                 std::array{shape0, cstride});
@@ -233,7 +233,7 @@ PYBIND11_MODULE(cpp, m)
            {
              auto [coeffs, cstride] = self.pack_ny(
                  origin_meshtag,
-                 xtl::span<const PetscScalar>(gap.data(), gap.size()));
+                 std::span<const PetscScalar>(gap.data(), gap.size()));
              int shape0 = cstride == 0 ? 0 : coeffs.size() / cstride;
              return dolfinx_wrappers::as_pyarray(std::move(coeffs),
                                                  std::array{shape0, cstride});
@@ -246,7 +246,7 @@ PYBIND11_MODULE(cpp, m)
           {
             auto [coeffs, cstride] = self.pack_u_contact(
                 origin_meshtag, u,
-                xtl::span<const PetscScalar>(gap.data(), gap.size()));
+                std::span<const PetscScalar>(gap.data(), gap.size()));
             int shape0 = cstride == 0 ? 0 : coeffs.size() / cstride;
             return dolfinx_wrappers::as_pyarray(std::move(coeffs),
                                                 std::array{shape0, cstride});
@@ -261,8 +261,8 @@ PYBIND11_MODULE(cpp, m)
           {
             auto [coeffs, cstride] = self.pack_grad_u_contact(
                 origin_meshtag, u,
-                xtl::span<const PetscScalar>(gap.data(), gap.size()),
-                xtl::span<const PetscScalar>(u_packed.data(), u_packed.size()));
+                std::span<const PetscScalar>(gap.data(), gap.size()),
+                std::span<const PetscScalar>(u_packed.data(), u_packed.size()));
             int shape0 = cstride == 0 ? 0 : coeffs.size() / cstride;
             return dolfinx_wrappers::as_pyarray(std::move(coeffs),
                                                 std::array{shape0, cstride});
@@ -293,7 +293,7 @@ PYBIND11_MODULE(cpp, m)
          int q, const py::array_t<std::int32_t, py::array::c_style>& entities)
       {
         auto e_span
-            = xtl::span<const std::int32_t>(entities.data(), entities.size());
+            = std::span<const std::int32_t>(entities.data(), entities.size());
         if (entities.ndim() == 1)
         {
 
@@ -323,7 +323,7 @@ PYBIND11_MODULE(cpp, m)
       [](const dolfinx::mesh::Mesh& mesh,
          const py::array_t<std::int32_t, py::array::c_style>& active_facets)
       {
-        auto e_span = xtl::span<const std::int32_t>(active_facets.data(),
+        auto e_span = std::span<const std::int32_t>(active_facets.data(),
                                                     active_facets.size());
         std::vector<double> coeffs
             = dolfinx_contact::pack_circumradius(mesh, e_span);
@@ -341,7 +341,7 @@ PYBIND11_MODULE(cpp, m)
            dolfinx::fem::IntegralType integral)
         {
           auto entity_span
-              = xtl::span<const std::int32_t>(entities.data(), entities.size());
+              = std::span<const std::int32_t>(entities.data(), entities.size());
           std::vector<std::int32_t> active_entities
               = dolfinx_contact::compute_active_entities(mesh, entity_span,
                                                          integral);
@@ -392,10 +392,10 @@ PYBIND11_MODULE(cpp, m)
          double tol)
       {
         auto facet_span
-            = xtl::span<const std::int32_t>(cells.data(), cells.size());
+            = std::span<const std::int32_t>(cells.data(), cells.size());
         const std::size_t gdim = mesh.geometry().dim();
         std::array<std::size_t, 1> s_p = {(std::size_t)point.shape(0)};
-        if (point.shape(0) != gdim)
+        if (std::size_t(point.shape(0)) != gdim)
         {
           throw std::invalid_argument(
               "Input point has to have same dimension as gdim");
@@ -403,7 +403,7 @@ PYBIND11_MODULE(cpp, m)
         auto _point
             = xt::adapt(point.data(), point.size(), xt::no_ownership(), s_p);
 
-        if (normal.shape(0) != gdim)
+        if (std::size_t(normal.shape(0)) != gdim)
         {
           throw std::invalid_argument(
               "Input normal has to have dimension gdim");

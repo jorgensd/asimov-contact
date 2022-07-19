@@ -4,9 +4,7 @@
 
 import gmsh
 import numpy as np
-from dolfinx.io import (XDMFFile, cell_perm_gmsh, extract_gmsh_geometry,
-                        extract_gmsh_topology_and_markers, ufl_mesh_from_gmsh)
-from dolfinx.mesh import CellType, create_mesh
+from dolfinx.io import gmshio, XDMFFile
 from mpi4py import MPI
 
 __all__ = ["create_circle_plane_mesh", "create_circle_circle_mesh", "create_box_mesh_2D",
@@ -44,15 +42,15 @@ def create_circle_plane_mesh(filename: str, quads: bool = False, res=0.1, order:
         ps = [p0, p1, p2, p3]
         lines = [gmsh.model.occ.addLine(ps[i - 1], ps[i]) for i in range(len(ps))]
         curve2 = gmsh.model.occ.addCurveLoop(lines)
-        surface2 = gmsh.model.occ.addPlaneSurface([curve, curve2])
+        surface2 = gmsh.model.occ.addPlaneSurface([curve2])
 
         # Synchronize and create physical tags
         gmsh.model.occ.synchronize()
-        gmsh.model.addPhysicalGroup(2, [surface])
+        gmsh.model.addPhysicalGroup(2, [surface], tag=1)
         bndry = gmsh.model.getBoundary([(2, surface)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry]
 
-        gmsh.model.addPhysicalGroup(2, [surface2], 2)
+        gmsh.model.addPhysicalGroup(2, [surface2], tag=2)
         bndry2 = gmsh.model.getBoundary([(2, surface2)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry2]
 
@@ -111,16 +109,16 @@ def create_circle_circle_mesh(filename: str, quads: bool = False, res: float = 0
             c_points2[i - 1], c2, c_points2[i]) for i in range(len(c_points2))]
         curve2 = gmsh.model.occ.addCurveLoop(arcs2)
         gmsh.model.occ.synchronize()
-        surface2 = gmsh.model.occ.addPlaneSurface([curve, curve2])
+        surface2 = gmsh.model.occ.addPlaneSurface([curve2])
 
         # Synchronize and create physical tags
         gmsh.model.occ.addPoint(0.5, 0.2, 0, tag=17)
         gmsh.model.occ.synchronize()
-        gmsh.model.addPhysicalGroup(2, [surface])
+        gmsh.model.addPhysicalGroup(2, [surface], tag=1)
         bndry = gmsh.model.getBoundary([(2, surface)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry]
 
-        gmsh.model.addPhysicalGroup(2, [surface2], 2)
+        gmsh.model.addPhysicalGroup(2, [surface2], tag=2)
         bndry2 = gmsh.model.getBoundary([(2, surface2)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry2]
 
@@ -190,11 +188,11 @@ def create_box_mesh_2D(filename: str, quads: bool = False, res=0.1, order: int =
 
         # Synchronize and create physical tags
         gmsh.model.occ.synchronize()
-        gmsh.model.addPhysicalGroup(2, [surface])
+        gmsh.model.addPhysicalGroup(2, [surface], tag=1)
         bndry = gmsh.model.getBoundary([(2, surface)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry]
 
-        gmsh.model.addPhysicalGroup(2, [surface2], 2)
+        gmsh.model.addPhysicalGroup(2, [surface2], tag=2)
         bndry2 = gmsh.model.getBoundary([(2, surface2)], oriented=False)
         [gmsh.model.addPhysicalGroup(b[0], [b[1]]) for b in bndry2]
 
@@ -250,11 +248,11 @@ def create_box_mesh_3D(filename: str, simplex: bool = True, res=0.1, order: int 
 
         # Synchronize and create physical tags
         model.occ.synchronize()
-        model.addPhysicalGroup(volumes[0][0], [volumes[0][1]])
+        model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], tag=1)
         bndry = model.getBoundary([(3, volumes[0][1])], oriented=False)
         [model.addPhysicalGroup(b[0], [b[1]]) for b in bndry]
 
-        model.addPhysicalGroup(3, [volumes[1][1]])
+        model.addPhysicalGroup(3, [volumes[1][1]], tag=2)
         bndry2 = model.getBoundary([(3, volumes[1][1])], oriented=False)
         [model.addPhysicalGroup(b[0], [b[1]]) for b in bndry2]
         if not simplex:
@@ -306,8 +304,8 @@ def create_sphere_plane_mesh(filename: str, order: int = 1):
             gmsh.model.addPhysicalGroup(boundary_tag[0], boundary_tag[1:2])
 
         p_v = [v_tag[1] for v_tag in out_vol_tags]
-        gmsh.model.addPhysicalGroup(3, p_v)
-        gmsh.model.addPhysicalGroup(3, [box])
+        gmsh.model.addPhysicalGroup(3, p_v, tag=9)
+        gmsh.model.addPhysicalGroup(3, [box],)
 
         gmsh.model.occ.synchronize()
         gmsh.model.mesh.field.add("Distance", 1)
@@ -434,42 +432,20 @@ def create_cylinder_cylinder_mesh(filename: str, order: int = 1, res=0.25, simpl
 
         gmsh.model.mesh.field.setAsBackgroundMesh(1)
         model.occ.synchronize()
-        model.mesh.generate(3)
-        model.mesh.setOrder(order)
 
-        volume_entities = []
-        for entity in model.getEntities(3):
-            volume_entities.append(entity[1])
-        model.addPhysicalGroup(3, volume_entities, tag=1)
+        for i, entity in enumerate(model.getEntities(3)):
+            model.addPhysicalGroup(3, [entity[1]], tag=i)
+
         model.setPhysicalName(3, 1, "Mesh volume")
 
-        # Sort mesh nodes according to their index in gmsh
-        x = extract_gmsh_geometry(model, model.getCurrent())
-        ct = "tetrahedron" if simplex else "hexahedron"
-        # Broadcast cell type data and geometric dimension
-        gmsh_cell_id = MPI.COMM_WORLD.bcast(
-            model.mesh.getElementType(ct, order), root=0)
+        model.mesh.generate(3)
+        model.mesh.setOrder(order)
+    msh, mt_domain, _ = gmshio.model_to_mesh(model, MPI.COMM_WORLD, 0, 3)
 
-        # Get mesh data for dim (0, tdim) for all physical entities
-        topologies = extract_gmsh_topology_and_markers(model, model.getCurrent())
-        cells = topologies[gmsh_cell_id]["topology"]
-
-        num_nodes = MPI.COMM_WORLD.bcast(cells.shape[1], root=0)
-        gmsh.finalize()
-    else:
-        gmsh_cell_id = MPI.COMM_WORLD.bcast(None, root=0)
-        num_nodes = MPI.COMM_WORLD.bcast(None, root=0)
-        cells, x = np.empty([0, num_nodes]), np.empty([0, 3])
-
-    # Permute the mesh topology from GMSH ordering to DOLFINx ordering
-    domain = ufl_mesh_from_gmsh(gmsh_cell_id, 3)
-    cell_type = CellType.tetrahedron if simplex else CellType.hexahedron
-    gmsh_hex = cell_perm_gmsh(cell_type, num_nodes)
-    cells = cells[:, gmsh_hex]
-
-    msh = create_mesh(MPI.COMM_WORLD, cells, x, domain)
     msh.name = "cylinder_cylinder"
+    mt_domain.name = "domain_marker"
 
     # Permute also entities which are tagged
     with XDMFFile(MPI.COMM_WORLD, f"{filename}.xdmf", "w") as file:
         file.write_mesh(msh)
+        file.write_meshtags(mt_domain)
