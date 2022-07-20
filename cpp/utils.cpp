@@ -824,8 +824,8 @@ dolfinx_contact::compute_distance_map(
       {
         for (std::size_t j = 0; j < num_qp_per_facet; ++j)
         {
-          dolfinx::common::impl::copy_N<2>(
-              std::next(quadrature_points[i].begin(), 2 * j),
+          dolfinx::common::impl::copy_N<3>(
+              std::next(quadrature_points[i].begin(), 3 * j),
               std::next(padded_quadrature_points.begin(),
                         (i * num_qp_per_facet + j) * 3));
         }
