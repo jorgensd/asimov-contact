@@ -772,23 +772,72 @@ dolfinx_contact::compute_distance_map(
     assert(quadrature_points.size() == quadrature_facets.size() / 2);
     assert(quadrature_points[0].shape(0) == q_offset[1] - q_offset[0]);
   }
-
   switch (mode)
   {
   case dolfinx_contact::ContactMode::ClosestPoint:
   {
+    std::size_t num_qp_per_facet = quadrature_points[0].shape(0);
+    xt::xtensor<double, 2> padded_quadrature_points = xt::zeros<double>(
+        {quadrature_points.size() * num_qp_per_facet, (std::size_t)3});
+
+    std::vector<std::int32_t> offsets(quadrature_points.size() + 1,
+                                      num_qp_per_facet);
+    for (std::size_t i = 0; i < offsets.size(); ++i)
+      offsets[i] *= i;
     if (tdim == 2)
     {
+      /// Pad quadrature points to 3D
+      for (std::size_t i = 0; i < quadrature_points.size(); ++i)
+      {
+        for (std::size_t j = 0; j < num_qp_per_facet; ++j)
+        {
+          dolfinx::common::impl::copy_N<2>(
+              std::next(quadrature_points[i].begin(), 2 * j),
+              std::next(padded_quadrature_points.begin(),
+                        (i * num_qp_per_facet + j) * 3));
+        }
+      }
+
       if (gdim == 2)
-        return dolfinx_contact::compute_projection_map<2, 2>(
-            candidate_mesh, quadrature_points, candidate_facets);
+      {
+        auto [closest_entities, reference_points]
+            = dolfinx_contact::compute_projection_map<2, 2>(
+                candidate_mesh, candidate_facets, padded_quadrature_points);
+        return {dolfinx::graph::AdjacencyList<std::int32_t>(closest_entities,
+                                                            offsets),
+                reference_points};
+      }
       else if (gdim == 3)
-        return dolfinx_contact::compute_projection_map<2, 3>(
-            candidate_mesh, quadrature_points, candidate_facets);
+      {
+        auto [closest_entities, reference_points]
+            = dolfinx_contact::compute_projection_map<2, 3>(
+                candidate_mesh, candidate_facets, padded_quadrature_points);
+        return {dolfinx::graph::AdjacencyList<std::int32_t>(closest_entities,
+                                                            offsets),
+                reference_points};
+      }
     }
     else if (tdim == 3)
-      return dolfinx_contact::compute_projection_map<3, 3>(
-          candidate_mesh, quadrature_points, candidate_facets);
+    {
+      // Copy into contiguous memory
+      for (std::size_t i = 0; i < quadrature_points.size(); ++i)
+      {
+        for (std::size_t j = 0; j < num_qp_per_facet; ++j)
+        {
+          dolfinx::common::impl::copy_N<2>(
+              std::next(quadrature_points[i].begin(), 2 * j),
+              std::next(padded_quadrature_points.begin(),
+                        (i * num_qp_per_facet + j) * 3));
+        }
+      }
+
+      auto [closest_entities, reference_points]
+          = dolfinx_contact::compute_projection_map<3, 3>(
+              candidate_mesh, candidate_facets, padded_quadrature_points);
+      return {dolfinx::graph::AdjacencyList<std::int32_t>(closest_entities,
+                                                          offsets),
+              reference_points};
+    }
     else
       throw std::invalid_argument("1D meshes not supported");
   }
