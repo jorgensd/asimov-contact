@@ -11,6 +11,7 @@
 #include "SubMesh.h"
 #include "elasticity.h"
 #include "geometric_quantities.h"
+#include "meshtie_kernels.h"
 #include "utils.h"
 #include <basix/cell.h>
 #include <basix/finite-element.h>
@@ -98,12 +99,11 @@ public:
   // set quadrature rule
   void set_quadrature_rule(QuadratureRule q_rule)
   {
-    _quadrature_rule
-        = std::make_shared<dolfinx_contact::QuadratureRule>(q_rule);
+    _quadrature_rule = std::make_shared<QuadratureRule>(q_rule);
   }
 
   // return size of coefficients vector per facet on s
-  std::size_t coefficients_size();
+  std::size_t coefficients_size(bool meshtie);
 
   /// return distance map (adjacency map mapping quadrature points on surface
   /// to closest facet on other surface)
@@ -185,7 +185,7 @@ public:
   /// packed at quadrature points. The coefficient `u` is packed at dofs.
   /// @note The vector valued coefficents `gap`, `test_fn`, `u`, `u_opposite`
   /// has dimension `bs == gdim`.
-  kernel_fn<PetscScalar> generate_kernel(dolfinx_contact::Kernel type)
+  kernel_fn<PetscScalar> generate_kernel(Kernel type)
   {
 
     std::shared_ptr<const dolfinx::mesh::Mesh> mesh = _V->mesh();
@@ -213,7 +213,7 @@ public:
            ndofs_cell * bs,
            num_q_points * bs};
 
-    auto kd = dolfinx_contact::KernelData(_V, _quadrature_rule, cstrides);
+    auto kd = KernelData(_V, _quadrature_rule, cstrides);
 
     /// @brief Assemble kernel for RHS of unbiased contact problem
     ///
@@ -232,9 +232,10 @@ public:
     /// @param[in] q_indices The quadrature points to loop over
     kernel_fn<PetscScalar> unbiased_rhs
         = [kd, gdim, ndofs_cell,
-           bs](std::vector<std::vector<PetscScalar>>& b, const PetscScalar* c,
-               const PetscScalar* w, const double* coordinate_dofs,
-               const int facet_index, const std::size_t num_links,
+           bs](std::vector<std::vector<PetscScalar>>& b,
+               std::span<const PetscScalar> c, const PetscScalar* w,
+               const double* coordinate_dofs, const int facet_index,
+               const std::size_t num_links,
                const std::vector<std::int32_t>& q_indices)
 
     {
@@ -267,8 +268,8 @@ public:
       if (kd.affine())
       {
         detJ = kd.compute_facet_jacobians(facet_index, J, K, J_tot, coord);
-        dolfinx_contact::physical_facet_normal(
-            n_phys, K, xt::row(kd.facet_normals(), facet_index));
+        physical_facet_normal(n_phys, K,
+                              xt::row(kd.facet_normals(), facet_index));
       }
 
       // Extract constants used inside quadrature loop
@@ -332,8 +333,7 @@ public:
           jump_un += -c[offset_u_opp + j] * n_surf[j];
         double sign_u = lmbda * tr_u * n_dot + mu * epsn_u;
         const double w0 = weights[q] * detJ;
-        double Pn_u
-            = dolfinx_contact::R_plus((jump_un - gap) - gamma * sign_u) * w0;
+        double Pn_u = R_plus((jump_un - gap) - gamma * sign_u) * w0;
         sign_u *= w0;
 
         // Fill contributions of facet with itself
@@ -381,11 +381,12 @@ public:
     /// with the cell.
     /// @param[in] q_indices The quadrature points to loop over
     kernel_fn<PetscScalar> unbiased_jac
-        = [kd, gdim, ndofs_cell,
-           bs](std::vector<std::vector<PetscScalar>>& A, const double* c,
-               const double* w, const double* coordinate_dofs,
-               const int facet_index, const std::size_t num_links,
-               const std::vector<std::int32_t>& q_indices)
+        = [kd, gdim, ndofs_cell, bs](std::vector<std::vector<PetscScalar>>& A,
+                                     std::span<const double> c, const double* w,
+                                     const double* coordinate_dofs,
+                                     const int facet_index,
+                                     const std::size_t num_links,
+                                     const std::vector<std::int32_t>& q_indices)
     {
       // Retrieve some data from kd
       std::array<std::int32_t, 2> q_offset
@@ -418,8 +419,8 @@ public:
       if (kd.affine())
       {
         detJ = kd.compute_facet_jacobians(facet_index, J, K, J_tot, coord);
-        dolfinx_contact::physical_facet_normal(
-            n_phys, K, xt::row(kd.facet_normals(), facet_index));
+        physical_facet_normal(n_phys, K,
+                              xt::row(kd.facet_normals(), facet_index));
       }
 
       // Extract scaled gamma (h/gamma) and its inverse
@@ -479,8 +480,7 @@ public:
         for (std::size_t j = 0; j < bs; ++j)
           jump_un += -c[offset_u_opp + j] * n_surf[j];
         double sign_u = lmbda * tr_u * n_dot + mu * epsn_u;
-        double Pn_u
-            = dolfinx_contact::dR_plus((jump_un - gap) - gamma * sign_u);
+        double Pn_u = dR_plus((jump_un - gap) - gamma * sign_u);
 
         // Fill contributions of facet with itself
         const double w0 = weights[q] * detJ;
@@ -530,10 +530,19 @@ public:
     };
     switch (type)
     {
-    case dolfinx_contact::Kernel::Rhs:
+    case Kernel::Rhs:
       return unbiased_rhs;
-    case dolfinx_contact::Kernel::Jac:
+    case Kernel::Jac:
       return unbiased_jac;
+    case Kernel::MeshTieRhs:
+    {
+
+      return generate_meshtie_kernel(type, _V, _quadrature_rule, max_links);
+    }
+    case Kernel::MeshTieJac:
+    {
+      return generate_meshtie_kernel(type, _V, _quadrature_rule, max_links);
+    }
     default:
       throw std::invalid_argument("Unrecognized kernel");
     }
@@ -563,9 +572,8 @@ public:
     }
 
     const std::vector<int>& qp_offsets = _quadrature_rule->offset();
-    dolfinx_contact::compute_physical_points(*mesh_sub, submesh_facets,
-                                             qp_offsets, _phi_ref_facets,
-                                             _qp_phys[origin_meshtag]);
+    compute_physical_points(*mesh_sub, submesh_facets, qp_offsets,
+                            _phi_ref_facets, _qp_phys[origin_meshtag]);
   }
 
   /// Compute maximum number of links
@@ -644,8 +652,7 @@ public:
     const std::vector<xt::xtensor<double, 2>>& qp_phys = _qp_phys[puppet_mt];
     const std::size_t num_facets = _cell_facet_pairs[puppet_mt].size() / 2;
     // NOTE: Assumes same number of quadrature points on all facets
-    dolfinx_contact::error::check_cell_type(
-        candidate_mesh->topology().cell_type());
+    error::check_cell_type(candidate_mesh->topology().cell_type());
     const std::size_t num_q_point
         = _quadrature_rule->offset()[1] - _quadrature_rule->offset()[0];
 
@@ -663,8 +670,7 @@ public:
     // Get the geometry dofs for each of the facets for each quadrature point on
     // the opposite surface
     const dolfinx::graph::AdjacencyList<std::int32_t> master_facets_geometry
-        = dolfinx_contact::entities_to_geometry_dofs(*candidate_mesh, fdim,
-                                                     master_facets);
+        = entities_to_geometry_dofs(*candidate_mesh, fdim, master_facets);
 
     // Temporary data structures used in loops
     xt::xtensor<double, 2> point = {{0, 0, 0}};
@@ -794,9 +800,9 @@ public:
 
       // Sort linked cells
       std::pair<std::vector<std::int32_t>, std::vector<std::int32_t>>
-          sorted_cells = dolfinx_contact::sort_cells(
-              std::span(linked_cells.data(), linked_cells.size()),
-              std::span(perm.data(), perm.size()));
+          sorted_cells
+          = sort_cells(std::span(linked_cells.data(), linked_cells.size()),
+                       std::span(perm.data(), perm.size()));
       const std::vector<std::int32_t>& unique_cells = sorted_cells.first;
       const std::vector<std::int32_t>& offsets = sorted_cells.second;
 
@@ -875,7 +881,7 @@ public:
     int candidate_mt = _contact_pairs[pair][1];
     dolfinx::common::Timer t("Pack contact u");
     // Mesh info
-    dolfinx_contact::SubMesh submesh = _submeshes[candidate_mt];
+    SubMesh submesh = _submeshes[candidate_mt];
     std::shared_ptr<const dolfinx::mesh::Mesh> mesh = submesh.mesh(); // mesh
     const std::size_t gdim = mesh->geometry().dim(); // geometrical dimension
     const std::size_t bs_element = _V->element()->block_size();
@@ -891,7 +897,7 @@ public:
     const std::size_t num_q_points
         = _quadrature_rule->offset()[1] - _quadrature_rule->offset()[0];
     // NOTE: Assuming same number of quadrature points on each cell
-    dolfinx_contact::error::check_cell_type(mesh->topology().cell_type());
+    error::check_cell_type(mesh->topology().cell_type());
     auto V_sub = std::make_shared<dolfinx::fem::FunctionSpace>(
         submesh.create_functionspace(_V));
     dolfinx::fem::Function<PetscScalar> u_sub(V_sub);

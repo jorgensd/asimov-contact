@@ -30,24 +30,25 @@
 namespace dolfinx_contact
 {
 
-enum class Kernel
-{
-  Rhs,
-  Jac
-};
-
 enum class ContactMode
 {
   ClosestPoint,
   RayTracing
 };
 
+enum class Kernel
+{
+  Rhs,
+  Jac,
+  MeshTieRhs,
+  MeshTieJac
+};
 // NOTE: this function should change signature to T * ,..... , num_links,
 // num_dofs_per_link
 template <typename T>
 using kernel_fn
-    = std::function<void(std::vector<std::vector<T>>&, const T*, const T*,
-                         const double*, const int, const std::size_t,
+    = std::function<void(std::vector<std::vector<T>>&, xtl::span<const T>,
+                         const T*, const double*, const int, const std::size_t,
                          const std::vector<std::int32_t>&)>;
 
 /// This function computes the pull back for a set of points x on a cell

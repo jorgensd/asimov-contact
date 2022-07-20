@@ -111,7 +111,7 @@ kernel_fn<T> generate_contact_kernel(
   /// quadrature points to add contributions from
   dolfinx_contact::kernel_fn<T> nitsche_rigid_rhs
       = [kd, gdim, tdim, phi_coeffs, constant_normal](
-            std::vector<std::vector<T>>& b, const T* c, const T* w,
+            std::vector<std::vector<T>>& b, std::span<const T> c, const T* w,
             const double* coordinate_dofs, const int facet_index,
             [[maybe_unused]] const std::size_t num_links,
             [[maybe_unused]] const std::vector<std::int32_t>& q_indices)
@@ -168,7 +168,7 @@ kernel_fn<T> generate_contact_kernel(
     double gamma = w[0] / c[c_offset + kd.offsets(3)];
     double gamma_inv = c[c_offset + kd.offsets(3)] / w[0];
     double theta = w[1];
-    xtl::span<const double> _weights(kd.q_weights());
+    std::span<const double> _weights(kd.q_weights());
     auto weights = _weights.subspan(q_offset[0], q_offset[1] - q_offset[0]);
 
     // Temporary variable for grad(phi) on physical cell
@@ -281,8 +281,8 @@ kernel_fn<T> generate_contact_kernel(
   /// quadrature points to add contributions from
   kernel_fn<T> nitsche_rigid_jacobian
       = [kd, gdim, tdim, phi_coeffs, dphi_coeffs, num_coeffs, constant_normal](
-            std::vector<std::vector<double>>& A, const T* c, const T* w,
-            const double* coordinate_dofs, const int facet_index,
+            std::vector<std::vector<double>>& A, std::span<const T> c,
+            const T* w, const double* coordinate_dofs, const int facet_index,
             [[maybe_unused]] const std::size_t num_links,
             [[maybe_unused]] const std::vector<std::int32_t>& q_indices)
   {
@@ -338,7 +338,7 @@ kernel_fn<T> generate_contact_kernel(
     double gamma_inv = c[c_offset + kd.offsets(3)] / w[0];
     double theta = w[1];
 
-    xtl::span<const double> _weights(kd.q_weights());
+    std::span<const double> _weights(kd.q_weights());
     auto weights = _weights.subspan(q_offset[0], q_offset[1] - q_offset[0]);
 
     // Extract reference to the tabulated basis function
