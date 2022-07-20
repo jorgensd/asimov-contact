@@ -306,7 +306,7 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
   assert(quadrature_mesh.geometry().dim() == gdim);
   assert(candidate_mesh.topology().dim() == tdim);
   assert(quadrature_mesh.topology().dim() == tdim);
-  std::cout << "HELLOO\n";
+
   // Convert (cell, local facet index) into facet index
   // (local to process) Convert cell,local_facet_index to
   // facet_index (local to proc)
@@ -443,13 +443,11 @@ compute_raytracing_map(const dolfinx::mesh::Mesh& quadrature_mesh,
       {
         colliding_facet[i / 2 * num_q_points + j] = facets[cell_idx];
         xt::row(reference_points, i / 2 * num_q_points + j)
-            = allocated_memory.X_k;
+            = xt::row(allocated_memory.X_k, 0);
       }
     }
   }
-  std::cout << colliding_facet.size() << "\n";
-  std::cout << reference_points << "\n";
-  std::vector<std::int32_t> offset(colliding_facet.size() + 1);
+  std::vector<std::int32_t> offset(quadrature_facets.size() / 2 + 1);
   std::iota(offset.begin(), offset.end(), 0);
   std::for_each(offset.begin(), offset.end(),
                 [num_q_points](auto& i) { i *= num_q_points; });
