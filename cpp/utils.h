@@ -560,7 +560,7 @@ compute_projection_map(const dolfinx::mesh::Mesh& mesh,
   }
 
   // Pull back to reference point for each facet on the surface
-  xt::xtensor<double, 2> candidate_X({num_points, (std::size_t)gdim});
+  xt::xtensor<double, 2> candidate_X({num_points, (std::size_t)tdim});
   {
     // Temporary data structures used in loop over each
     // quadrature point on each facet
@@ -612,6 +612,6 @@ compute_projection_map(const dolfinx::mesh::Mesh& mesh,
           X.begin(), std::next(candidate_X.begin(), i * tdim));
     }
   }
-  return {closest_facets, candidate_x};
+  return {closest_facets, candidate_X};
 }
 } // namespace dolfinx_contact

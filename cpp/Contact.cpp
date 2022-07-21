@@ -251,14 +251,11 @@ void dolfinx_contact::Contact::create_distance_map(int pair)
       submesh_facets[i + 1] = candidate_facets[i + 1];
     }
   }
-  std::cout << quadrature_facets.size() << " " << submesh_facets.size() << "\n"
-            << std::int32_t(_mode) << " "
-            << (std::int32_t)dolfinx_contact::ContactMode::ClosestPoint << "\n";
-
   // Compute facet map
   auto [adj, reference_x] = dolfinx_contact::compute_distance_map(
       *puppet_mesh, quadrature_facets, *candidate_mesh, submesh_facets,
       *_quadrature_rule, _mode);
+
   _facet_maps[pair]
       = std::make_shared<dolfinx::graph::AdjacencyList<std::int32_t>>(adj);
   // NOTE: More data that should be updated inside this code
