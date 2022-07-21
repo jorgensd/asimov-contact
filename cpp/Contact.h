@@ -1046,8 +1046,7 @@ public:
   /// where Pi(x) is the chosen projection of x onto the contact surface of
   /// the body coming into contact
   /// @param[out] c - normals ny packed on facets.
-  std::pair<std::vector<PetscScalar>, int>
-  pack_ny(int pair, const std::span<const PetscScalar> gap);
+  std::pair<std::vector<PetscScalar>, int> pack_ny(int pair);
 
   /// Pack gap with rigid surface defined by x[gdim-1] = -g.
   /// g_vec = zeros(gdim), g_vec[gdim-1] = -g
